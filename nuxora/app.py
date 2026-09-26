@@ -1,7 +1,11 @@
 import json
 import os
+import platform
+import subprocess
 import time
+from pathlib import Path
 
+import psutil
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, ScrollableContainer, Vertical
 from textual.screen import ModalScreen
@@ -80,10 +84,7 @@ class SettingsScreen(ModalScreen):
 
     def compose(self):
         with Vertical(id="settings"):
-            yield Static(
-                "NUXORA DISPLAY SETTINGS",
-                id="settings-title",
-            )
+            yield Static("NUXORA DISPLAY SETTINGS", id="settings-title")
 
             with ScrollableContainer(id="checks"):
                 for key, name in self.main_app.collectors:
@@ -94,23 +95,10 @@ class SettingsScreen(ModalScreen):
                     )
 
             with Horizontal(id="buttons"):
-                yield Button(
-                    "Show All",
-                    id="show-all",
-                )
-                yield Button(
-                    "Hide All",
-                    id="hide-all",
-                )
-                yield Button(
-                    "Apply",
-                    variant="primary",
-                    id="apply",
-                )
-                yield Button(
-                    "Cancel",
-                    id="cancel",
-                )
+                yield Button("Show All", id="show-all")
+                yield Button("Hide All", id="hide-all")
+                yield Button("Apply", variant="primary", id="apply")
+                yield Button("Cancel", id="cancel")
 
     def on_button_pressed(self, event):
         button_id = event.button.id
@@ -145,11 +133,7 @@ class SettingsScreen(ModalScreen):
             ).value
 
             self.main_app.collector_visibility[key] = value
-
-            self.main_app.set_panel_visible(
-                key,
-                value,
-            )
+            self.main_app.set_panel_visible(key, value)
 
         self.main_app.save_visibility()
         self.main_app.refresh_all()
@@ -158,6 +142,7 @@ class SettingsScreen(ModalScreen):
 
 class Nuxora(App):
     TITLE = "Nuxora"
+    SUB_TITLE = "Linux System Monitor"
 
     CSS = """
     Screen {
@@ -185,9 +170,9 @@ class Nuxora(App):
     }
 
     .panel.maximized {
-        height: 1fr;
-        max-height: none;
+        height: 40;
         min-height: 20;
+        max-height: 40;
     }
 
     .title {
@@ -205,8 +190,8 @@ class Nuxora(App):
     }
 
     .panel.maximized .content {
-        height: 1fr;
-        max-height: none;
+        height: 30;
+        max-height: 30;
         overflow: auto;
     }
 
@@ -221,12 +206,6 @@ class Nuxora(App):
         height: auto;
     }
     """
-
-    BINDINGS = [
-        ("q", "quit", "Quit"),
-        ("r", "refresh_all", "Refresh"),
-        ("ctrl+s", "settings", "Settings"),
-    ]
 
     collectors = [
         ("system", "System"),
@@ -303,26 +282,26 @@ class Nuxora(App):
     def __init__(self):
         super().__init__()
 
-        base = os.path.expanduser(
-            "~/.config/nuxora"
+        self.config_dir = (
+            Path.home() / ".config" / "nuxora"
         )
 
-        self.visibility_path = (
-            f"{base}/visibility.json"
+        self.visibility_file = (
+            self.config_dir / "visibility.json"
         )
 
-        self.theme_path = (
-            f"{base}/theme.json"
+        self.theme_file = (
+            self.config_dir / "theme.json"
         )
 
         self.collector_visibility = (
             self.load_visibility()
         )
 
-        self.running = set()
-
-        self.net = None
-        self.net_time = time.monotonic()
+        self.collector_visibility = {
+            key: self.collector_visibility.get(key, True)
+            for key, _ in self.collectors
+        }
 
         self.jobs = {
             "system": self.collect_system,
@@ -357,6 +336,11 @@ class Nuxora(App):
             "cuda": self.collect_cuda,
         }
 
+        self.running = set()
+
+        self.last_network = None
+        self.last_disk = None
+
     def compose(self) -> ComposeResult:
         yield Header()
 
@@ -385,30 +369,32 @@ class Nuxora(App):
         yield Footer()
 
     def on_mount(self):
-        self.load_theme()
-
-        for key, _ in self.collectors:
-            self.set_panel_visible(
-                key,
-                self.enabled(key),
-            )
-
-        self.refresh_all()
-
         self.set_interval(
             1,
-            self.update_fast,
+            self.refresh_fast,
         )
 
         self.set_interval(
             3,
-            self.update_medium,
+            self.refresh_medium,
         )
 
         self.set_interval(
             10,
-            self.update_slow,
+            self.refresh_slow,
         )
+
+        self.refresh_all()
+
+    def action_settings(self):
+        self.push_screen(
+            SettingsScreen(self)
+        )
+
+    def action_quit(self):
+        self.save_visibility()
+        self.save_theme()
+        self.exit()
 
     def on_button_pressed(self, event):
         button_id = event.button.id
@@ -417,7 +403,10 @@ class Nuxora(App):
             return
 
         if button_id.startswith("maximize-"):
-            key = button_id.removeprefix("maximize-")
+            key = button_id.removeprefix(
+                "maximize-"
+            )
+
             self.toggle_panel(key)
 
     def toggle_panel(self, key):
@@ -442,31 +431,135 @@ class Nuxora(App):
         except Exception:
             pass
 
-    def action_quit(self):
-        self.save_theme()
-        self.save_visibility()
-        self.exit()
-
-    def action_refresh_all(self):
-        self.refresh_all()
-
-    def action_settings(self):
-        self.push_screen(
-            SettingsScreen(self)
+    def enabled(self, key):
+        return self.collector_visibility.get(
+            key,
+            True,
         )
 
-    def refresh_all(self):
-        self.update_fast()
-        self.update_medium()
-        self.update_slow()
+    def set_panel_visible(self, key, visible):
+        try:
+            panel = self.query_one(
+                f"#box-{key}",
+                Vertical,
+            )
 
-    def update_fast(self):
+            if visible:
+                panel.display = True
+            else:
+                panel.display = False
+
+        except Exception:
+            pass
+
+    def set(self, key, text):
+        try:
+            widget = self.query_one(
+                f"#panel-{key}",
+                Static,
+            )
+
+            widget.update(text)
+
+        except Exception:
+            pass
+
+    def load_visibility(self):
+        try:
+            if self.visibility_file.exists():
+                with self.visibility_file.open(
+                    "r",
+                    encoding="utf-8",
+                ) as f:
+                    data = json.load(f)
+
+                if isinstance(data, dict):
+                    return data
+
+        except Exception:
+            pass
+
+        return {}
+
+    def save_visibility(self):
+        try:
+            self.config_dir.mkdir(
+                parents=True,
+                exist_ok=True,
+            )
+
+            with self.visibility_file.open(
+                "w",
+                encoding="utf-8",
+            ) as f:
+                json.dump(
+                    self.collector_visibility,
+                    f,
+                    indent=2,
+                )
+
+        except Exception:
+            pass
+
+    def load_theme(self):
+        try:
+            if self.theme_file.exists():
+                with self.theme_file.open(
+                    "r",
+                    encoding="utf-8",
+                ) as f:
+                    data = json.load(f)
+
+                if isinstance(data, dict):
+                    return data.get("theme")
+
+        except Exception:
+            pass
+
+        return None
+
+    def save_theme(self):
+        try:
+            self.config_dir.mkdir(
+                parents=True,
+                exist_ok=True,
+            )
+
+            theme = getattr(
+                self,
+                "theme",
+                None,
+            )
+
+            if theme:
+                with self.theme_file.open(
+                    "w",
+                    encoding="utf-8",
+                ) as f:
+                    json.dump(
+                        {"theme": theme},
+                        f,
+                        indent=2,
+                    )
+
+        except Exception:
+            pass
+
+    def watch_theme(self, theme):
+        self.save_theme()
+
+    def refresh_all(self):
+        self.refresh_fast()
+        self.refresh_medium()
+        self.refresh_slow()
+
+    def refresh_fast(self):
         self.run_group(self.fast)
 
-    def update_medium(self):
+    def refresh_medium(self):
         self.run_group(self.medium)
 
-    def update_slow(self):
+    def refresh_slow(self):
         self.run_group(self.slow)
 
     def run_group(self, group):
@@ -476,6 +569,9 @@ class Nuxora(App):
 
     def run_collector(self, key):
         if key in self.running:
+            return
+
+        if key not in self.jobs:
             return
 
         self.running.add(key)
@@ -513,675 +609,22 @@ class Nuxora(App):
                 key,
                 f"Collector error: {error}",
             )
-        elif result is not None:
+            return
+
+        if result is not None:
             self.set(
                 key,
                 result,
             )
 
-    def enabled(self, key):
-        return self.collector_visibility.get(
-            key,
-            True,
-        )
-
-    def set_panel_visible(self, key, visible):
-        try:
-            self.query_one(
-                f"#box-{key}",
-                Vertical,
-            ).display = visible
-        except Exception:
-            pass
-
-    def set(self, key, value):
-        try:
-            self.query_one(
-                f"#panel-{key}",
-                Static,
-            ).update(str(value))
-        except Exception:
-            pass
-
-    def load_visibility(self):
-        result = {
-            key: True
-            for key, _ in self.collectors
-        }
-
-        try:
-            with open(
-                self.visibility_path,
-                encoding="utf-8",
-            ) as f:
-                data = json.load(f)
-
-            if isinstance(data, dict):
-                result.update(
-                    {
-                        k: bool(v)
-                        for k, v in data.items()
-                        if k in result
-                    }
-                )
-
-        except Exception:
-            pass
-
-        return result
-
-    def save_visibility(self):
-        try:
-            os.makedirs(
-                os.path.dirname(
-                    self.visibility_path
-                ),
-                exist_ok=True,
-            )
-
-            with open(
-                self.visibility_path,
-                "w",
-                encoding="utf-8",
-            ) as f:
-                json.dump(
-                    self.collector_visibility,
-                    f,
-                    indent=2,
-                )
-
-        except Exception:
-            pass
-
-    def load_theme(self):
-        try:
-            with open(
-                self.theme_path,
-                encoding="utf-8",
-            ) as f:
-                theme = json.load(f).get("theme")
-
-            if theme in self.available_themes:
-                self.theme = theme
-
-        except Exception:
-            pass
-
-    def save_theme(self):
-        try:
-            os.makedirs(
-                os.path.dirname(
-                    self.theme_path
-                ),
-                exist_ok=True,
-            )
-
-            with open(
-                self.theme_path,
-                "w",
-                encoding="utf-8",
-            ) as f:
-                json.dump(
-                    {"theme": self.theme},
-                    f,
-                )
-
-        except Exception:
-            pass
-
-    def watch_theme(self, theme):
-        self.save_theme()
-
-    def collect_system(self):
-        s = get_system()
-
-        b = (
-            f"\nBattery   {s['battery']:.0f}%"
-            + (
-                " Charging"
-                if s.get("charging")
-                else ""
-            )
-            if s.get("battery") is not None
-            else ""
-        )
-
-        return (
-            f"OS        {s['os']}\n"
-            f"Kernel    {s['kernel']}\n"
-            f"Machine   {s['machine']}\n"
-            f"Host      {s['host']}\n"
-            f"Uptime    {s['uptime']}\n"
-            f"Time      {s['time']}\n"
-            f"Users     {s['users']}\n"
-            f"Boot      {s['boot']}{b}"
-        )
-
-    def collect_cpu(self):
-        c = get_cpu()
-        f = c["frequency"]
-
-        lines = [
-            f"Total     {c['total']:5.1f}%",
-            f"Cores     {c['count']} "
-            f"({c['physical']} physical)",
-        ]
-
-        if f:
-            lines += [
-                f"Clock     {f.current:5.0f} MHz",
-                f"Max       {f.max:5.0f} MHz",
-            ]
-
-        lines += [
-            "",
-            *[
-                f"{i:02d} "
-                f"{self.bar(v, 20)} "
-                f"{v:5.1f}%"
-                for i, v in enumerate(c["cores"])
-            ],
-            "",
-            f"Load      "
-            f"{c['load'][0]:.2f} "
-            f"{c['load'][1]:.2f} "
-            f"{c['load'][2]:.2f}",
-        ]
-
-        return "\n".join(lines)
-
-    def collect_memory(self):
-        m = get_memory()
-        r, s = m["ram"], m["swap"]
-
-        return (
-            f"RAM       "
-            f"{self.bytes(r.used)} / "
-            f"{self.bytes(r.total)}\n"
-            f"Usage     {r.percent:5.1f}%\n"
-            f"{self.bar(r.percent)}\n\n"
-            f"Available "
-            f"{self.bytes(r.available)}\n"
-            f"Cached    "
-            f"{self.bytes(getattr(r, 'cached', 0))}\n"
-            f"Buffers   "
-            f"{self.bytes(getattr(r, 'buffers', 0))}\n"
-            f"Shared    "
-            f"{self.bytes(getattr(r, 'shared', 0))}\n\n"
-            f"SWAP      "
-            f"{self.bytes(s.used)} / "
-            f"{self.bytes(s.total)}\n"
-            f"Usage     {s.percent:5.1f}%\n"
-            f"{self.bar(s.percent)}"
-        )
-
-    def collect_gpu(self):
-        gpus = get_gpu()
-
-        if not gpus:
-            return "NVIDIA GPU unavailable."
-
-        lines = []
-
-        for i, g in enumerate(gpus):
-            u = (
-                g["vram_used"]
-                / g["vram_total"]
-                * 100
-                if g["vram_total"]
-                else 0
-            )
-
-            lines += [
-                g["name"],
-                f"GPU       {g['gpu']:5.1f}%",
-                f"VRAM      "
-                f"{self.bytes(g['vram_used'])} / "
-                f"{self.bytes(g['vram_total'])}",
-                f"Usage     {u:5.1f}%\n"
-                f"{self.bar(u)}",
-                f"Temp      "
-                f"{g.get('temp', 0)}°C",
-                f"Power     "
-                f"{g.get('power', 0):.1f} W",
-                f"Clock     "
-                f"{g.get('clock', 0)} MHz",
-                f"Mem Clock "
-                f"{g.get('memclock', 0)} MHz",
-            ]
-
-            if g.get("fan") is not None:
-                lines.append(
-                    f"Fan       {g['fan']}%"
-                )
-
-            if i < len(gpus) - 1:
-                lines.append("")
-
-        return "\n".join(lines)
-
-    def collect_network(self):
-        n = get_network()
-        total = n["total"]
-        now = time.monotonic()
-
-        if self.net is None:
-            self.net = total
-            self.net_time = now
-
-        dt = max(
-            now - self.net_time,
-            0.001,
-        )
-
-        rx = (
-            total.bytes_recv
-            - self.net.bytes_recv
-        ) / dt
-
-        tx = (
-            total.bytes_sent
-            - self.net.bytes_sent
-        ) / dt
-
-        self.net = total
-        self.net_time = now
-
-        lines = [
-            f"Download   "
-            f"{self.bytes(rx)}/s",
-            f"Upload     "
-            f"{self.bytes(tx)}/s",
-            "",
-            f"Total RX   "
-            f"{self.bytes(total.bytes_recv)}",
-            f"Total TX   "
-            f"{self.bytes(total.bytes_sent)}",
-            "",
-            f"Packets RX "
-            f"{total.packets_recv:,}",
-            f"Packets TX "
-            f"{total.packets_sent:,}",
-            f"Errors RX  "
-            f"{total.errin:,}",
-            f"Errors TX  "
-            f"{total.errout:,}",
-            "",
-        ]
-
-        lines += [
-            f"{name[:12]:12} "
-            f"↓{self.bytes(i.bytes_recv)} "
-            f"↑{self.bytes(i.bytes_sent)}"
-            for name, i in n["interfaces"].items()
-        ]
-
-        return "\n".join(
-            lines
-            + [
-                "",
-                f"Connections "
-                f"{len(n['connections'])}",
-            ]
-        )
-
-    def collect_disk(self):
-        lines = []
-
-        for d in get_disks():
-            lines += [
-                d["device"],
-                d["mount"],
-                f"{self.bar(d['percent'])} "
-                f"{d['percent']:5.1f}%",
-                f"Used      "
-                f"{self.bytes(d['used'])}",
-                f"Free      "
-                f"{self.bytes(d['free'])}",
-                f"Total     "
-                f"{self.bytes(d['total'])}",
-                f"Type      "
-                f"{d['fstype']}",
-                "",
-            ]
-
-        io = get_io()
-
-        if io:
-            lines += [
-                f"Read      "
-                f"{self.bytes(io.read_bytes)}",
-                f"Write     "
-                f"{self.bytes(io.write_bytes)}",
-            ]
-
-        devices = get_devices()
-
-        if devices:
-            lines.append(
-                "\nBLOCK DEVICES"
-            )
-
-            lines += [
-                f"{d.get('path', d.get('name', '?')):16} "
-                f"{d.get('size', '?'):>9} "
-                f"{d.get('type', '?'):6} "
-                f"{d.get('model') or ''}"
-                for d in devices
-            ]
-
-        return "\n".join(lines) or "No disks."
-
-    def collect_processes(self):
-        p = get_processes()[:25]
-
-        return "\n".join(
-            [
-                "PID       PROCESS                       "
-                "CPU      RAM       MEMORY       STATUS",
-                *[
-                    f"{x['pid']:<9}"
-                    f"{x['name'][:28]:<29}"
-                    f"{x['cpu']:>5.1f}%   "
-                    f"{x['ram']:>5.1f}%   "
-                    f"{self.bytes(x['memory']):>10}   "
-                    f"{x['status']}"
-                    for x in p
-                ],
-            ]
-        )
-
-    def collect_sensors(self):
-        s = get_sensors()
-        lines = []
-
-        for chip, items in s["temperatures"].items():
-            lines.append(chip)
-
-            for x in items:
-                h = (
-                    f"  high "
-                    f"{x['high']:.1f}°C"
-                    if x["high"]
-                    else ""
-                )
-
-                lines.append(
-                    f"  "
-                    f"{x['label'] or '?':20} "
-                    f"{x['current']:6.1f}°C"
-                    f"{h}"
-                )
-
-        for items in s["fans"].values():
-            for x in items:
-                lines.append(
-                    f"  FAN "
-                    f"{x['label'] or '?':16} "
-                    f"{x['current']:6.0f} RPM"
-                )
-
-        return (
-            "\n".join(lines)
-            or "No sensors found."
-        )
-
-    def collect_services(self):
-        return "\n".join(
-            f"{x['name']:<40} "
-            f"{x['active']:<8} "
-            f"{x['sub']:<10} "
-            f"{x['description']}"
-            for x in get_services()[:100]
-        ) or "No services found."
-
-    def collect_filesystem(self):
-        return "\n".join(
-            f"{x['mount']:<25} "
-            f"{x['fstype']:<8} "
-            f"{self.bar(x['percent'], 16)} "
-            f"{x['percent']:5.1f}% "
-            f"{self.bytes(x['free'])} free"
-            for x in get_filesystems()
-        ) or "No filesystems."
-
-    def collect_usb(self):
-        return "\n".join(
-            f"{x['bus']}:{x['device']}  "
-            f"{x['id']}  "
-            f"{x['name']}"
-            for x in get_usb()
-        ) or "No USB devices."
-
-    def collect_pci(self):
-        return "\n".join(
-            f"{x['slot']:<15} "
-            f"{x['class']:<25} "
-            f"{x['vendor']} "
-            f"{x['device']}"
-            for x in get_pci()
-        ) or "No PCI devices."
-
-    def collect_battery(self):
-        b = get_battery()
-
-        if not b:
-            return "No battery detected."
-
-        return (
-            f"Charge    "
-            f"{b['percent']:.1f}%\n"
-            f"{self.bar(b['percent'])}\n"
-            f"Status    "
-            f"{'Charging / AC' if b['plugged'] else 'Discharging'}\n"
-            f"Time      "
-            f"{self.seconds(b['seconds_left'])}"
-        )
-
-    def collect_audio(self):
-        return (
-            "\n".join(get_audio())
-            or "No audio information."
-        )
-
-    def collect_bluetooth(self):
-        return "\n".join(
-            f"{x['mac']:<18} "
-            f"{x['name']}"
-            for x in get_bluetooth()
-        ) or "No Bluetooth devices."
-
-    def collect_wifi(self):
-        lines = []
-
-        for x in get_wifi():
-            lines.append(
-                f"{x['name']:<12} "
-                f"{'CONNECTED' if x['connected'] else 'DISCONNECTED'}"
-            )
-
-            if x.get("link"):
-                lines.append(
-                    f"  {x['link']}"
-                )
-
-        return (
-            "\n".join(lines)
-            or "No Wi-Fi interfaces."
-        )
-
-    def collect_users(self):
-        return "\n".join(
-            f"{x['name']:<20} "
-            f"{str(x['terminal']):<10} "
-            f"{str(x['host']):<20} "
-            f"PID {x['pid']}"
-            for x in get_users()
-        ) or "No logged-in users."
-
-    def collect_logs(self):
-        return (
-            "\n".join(get_logs(20))
-            or "No logs."
-        )
-
-    def collect_kernel(self):
-        k = get_kernel()
-
-        return (
-            f"Release       {k['release']}\n"
-            f"Version       {k['version']}\n"
-            f"Machine       {k['machine']}\n"
-            f"Command line  {k['cmdline']}\n\n"
-            f"Loaded modules: "
-            f"{len(k['modules'])}"
-        )
-
-    def collect_process_tree(self):
-        tree = get_process_tree()
-        lines = []
-
-        for pid, children in tree.items():
-            if children:
-                names = ", ".join(
-                    f"{x['name']}({x['pid']})"
-                    for x in children[:8]
-                )
-
-                lines.append(
-                    f"{pid:<8} → {names}"
-                )
-
-        return (
-            "\n".join(lines[:80])
-            or "No process tree."
-        )
-
-    def collect_containers(self):
-        return "\n".join(
-            f"{x['id'][:12]:12} "
-            f"{x['name']:<20} "
-            f"{x['status']:<25} "
-            f"{x['image']}"
-            for x in get_containers()
-        ) or "No containers."
-
-    def collect_virtualization(self):
-        x = get_virtualization()
-
-        return (
-            f"Virtualization  "
-            f"{x['virtualization']}\n"
-            f"KVM             "
-            f"{'available' if x['kvm'] else 'unavailable'}\n"
-            f"Hypervisor      "
-            f"{'present' if x['hypervisor'] else 'not detected'}"
-        )
-
-    def collect_packages(self):
-        x = get_packages()
-
-        return (
-            f"Manager   "
-            f"{x['manager'] or 'none'}\n"
-            f"Packages  "
-            f"{len(x['packages']):,}\n\n"
-            + "\n".join(
-                x["packages"][:50]
-            )
-        )
-
-    def collect_mounts(self):
-        return "\n".join(
-            f"{x['device']:<25} "
-            f"{x['mount']:<30} "
-            f"{x['fstype']:<10} "
-            f"{x['options']}"
-            for x in get_mounts()
-        ) or "No mounts."
-
-    def collect_cron(self):
-        t, c = (
-            get_timers(),
-            get_crontab(),
-        )
-
-        if not t and not c:
-            return "No timers or crontab."
-
-        return (
-            "SYSTEMD TIMERS\n"
-            + "\n".join(t[:30])
-            + "\n\nCRONTAB\n"
-            + "\n".join(c)
-        )
-
-    def collect_gpu_processes(self):
-        return "\n".join(
-            f"{x['pid']:<8} "
-            f"{x['name']:<35} "
-            f"{x['vram']:>8} MiB"
-            for x in get_gpu_processes()
-        ) or "No GPU processes."
-
-    def collect_ai(self):
-        return "\n".join(
-            f"{x['pid']:<8} "
-            f"{x['name']:<20} "
-            f"CPU {x['cpu']:5.1f}% "
-            f"RAM {self.bytes(x['memory'])}"
-            for x in get_ai_processes()
-        ) or "No AI processes detected."
-
-    def collect_ollama(self):
-        return "\n".join(
-            f"{x.get('name', '?'):<35} "
-            f"{x.get('size', '?')} "
-            f"{x.get('expires_at', '')}"
-            for x in get_ollama()
-        ) or "Ollama is not running."
-
-    def collect_cuda(self):
-        x = get_cuda()
-
-        if not x:
-            return "NVIDIA CUDA unavailable."
-
-        return "\n".join(
-            f"{g['name']}\n"
-            f"Driver    {g['driver']}\n"
-            f"CUDA      {g['cuda']}"
-            for g in x
-        )
-
-    def collect_pytorch(self):
-        x = get_pytorch()
-
-        lines = [
-            f"PyTorch   "
-            f"{x['version'] or 'not installed'}",
-            f"CUDA      "
-            f"{x['cuda'] or 'none'}",
-            f"Available "
-            f"{'YES' if x['available'] else 'NO'}",
-        ]
-
-        for g in x["gpus"]:
-            lines += [
-                "",
-                f"GPU {g['index']}  "
-                f"{g['name']}",
-                f"VRAM      "
-                f"{self.bytes(g['memory'])}",
-            ]
-
-        return "\n".join(lines)
-
     @staticmethod
     def bar(value, width=18):
         value = max(
             0,
-            min(100, float(value)),
+            min(
+                100,
+                float(value),
+            ),
         )
 
         n = int(
@@ -1219,6 +662,523 @@ class Nuxora(App):
         return time.strftime(
             "%H:%M:%S",
             time.gmtime(value),
+        )
+
+    def collect_system(self):
+        try:
+            data = get_system()
+
+            return "\n".join(
+                [
+                    f"OS: {data.get('os', 'Unknown')}",
+                    f"Kernel: {data.get('kernel', platform.release())}",
+                    f"Machine: {data.get('machine', platform.machine())}",
+                    f"Host: {data.get('hostname', platform.node())}",
+                    f"Uptime: {self.seconds(data.get('uptime'))}",
+                    f"Time: {data.get('time', time.strftime('%H:%M:%S'))}",
+                    f"Users: {data.get('users', 'Unknown')}",
+                    f"Boot: {data.get('boot', 'Unknown')}",
+                    f"Battery: {data.get('battery', 'Unknown')}",
+                    f"Charging: {data.get('charging', 'Unknown')}",
+                ]
+            )
+
+        except Exception:
+            return self.basic_system()
+
+    def basic_system(self):
+        uptime = (
+            time.time()
+            - psutil.boot_time()
+        )
+
+        return "\n".join(
+            [
+                f"OS: {platform.system()} {platform.release()}",
+                f"Kernel: {platform.release()}",
+                f"Machine: {platform.machine()}",
+                f"Host: {platform.node()}",
+                f"Uptime: {self.seconds(uptime)}",
+                f"Time: {time.strftime('%H:%M:%S')}",
+                f"Users: {len(psutil.users())}",
+                f"Boot: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(psutil.boot_time()))}",
+            ]
+        )
+
+    def collect_cpu(self):
+        try:
+            data = get_cpu()
+
+            if isinstance(data, str):
+                return data
+
+            if not isinstance(data, dict):
+                return str(data)
+
+            lines = [
+                f"Usage: {data.get('usage', data.get('percent', 0))}%",
+                f"Cores: {data.get('cores', psutil.cpu_count(logical=True))}",
+                f"Frequency: {data.get('frequency', 'Unknown')}",
+            ]
+
+            per_cpu = data.get("per_cpu")
+
+            if per_cpu:
+                lines.append("")
+                lines.append("Per-core:")
+
+                for i, value in enumerate(per_cpu):
+                    lines.append(
+                        f"{i:02d} "
+                        f"{self.bar(value, 12)} "
+                        f"{value:.1f}%"
+                    )
+
+            load = data.get("load")
+
+            if load:
+                lines.append("")
+                lines.append(
+                    f"Load: {load}"
+                )
+
+            return "\n".join(lines)
+
+        except Exception as e:
+            return f"CPU error: {e}"
+
+    def collect_memory(self):
+        try:
+            data = get_memory()
+
+            if isinstance(data, str):
+                return data
+
+            if not isinstance(data, dict):
+                return str(data)
+
+            percent = data.get(
+                "percent",
+                psutil.virtual_memory().percent,
+            )
+
+            lines = [
+                f"RAM: {self.bytes(data.get('total', 0))}",
+                f"Used: {self.bytes(data.get('used', 0))}",
+                f"Usage: {percent:.1f}%",
+                self.bar(percent),
+                f"Available: {self.bytes(data.get('available', 0))}",
+                f"Cached: {self.bytes(data.get('cached', 0))}",
+                f"Buffers: {self.bytes(data.get('buffers', 0))}",
+                f"Shared: {self.bytes(data.get('shared', 0))}",
+            ]
+
+            swap = data.get("swap")
+
+            if isinstance(swap, dict):
+                lines.extend(
+                    [
+                        "",
+                        "Swap:",
+                        f"Total: {self.bytes(swap.get('total', 0))}",
+                        f"Used: {self.bytes(swap.get('used', 0))}",
+                        f"Usage: {swap.get('percent', 0):.1f}%",
+                    ]
+                )
+
+            return "\n".join(lines)
+
+        except Exception as e:
+            return f"Memory error: {e}"
+
+    def collect_gpu(self):
+        try:
+            data = get_gpu()
+
+            if isinstance(data, str):
+                return data
+
+            if isinstance(data, list):
+                lines = []
+
+                for gpu in data:
+                    if isinstance(gpu, dict):
+                        name = gpu.get(
+                            "name",
+                            "GPU",
+                        )
+
+                        usage = gpu.get(
+                            "utilization",
+                            gpu.get("gpu", 0),
+                        )
+
+                        lines.extend(
+                            [
+                                str(name),
+                                f"GPU: {usage}%",
+                                self.bar(usage),
+                                f"VRAM: {self.bytes(gpu.get('memory_used', 0))} / {self.bytes(gpu.get('memory_total', 0))}",
+                                f"Temperature: {gpu.get('temperature', 'Unknown')}°C",
+                                f"Power: {gpu.get('power', 'Unknown')}",
+                                f"Clock: {gpu.get('clock', 'Unknown')}",
+                                "",
+                            ]
+                        )
+
+                return "\n".join(lines).rstrip()
+
+            return str(data)
+
+        except Exception as e:
+            return f"GPU error: {e}"
+
+    def collect_network(self):
+        try:
+            data = get_network()
+
+            if isinstance(data, str):
+                return data
+
+            if not isinstance(data, dict):
+                return str(data)
+
+            lines = []
+
+            if "download" in data:
+                lines.append(
+                    f"Download: {self.bytes(data['download'])}/s"
+                )
+
+            if "upload" in data:
+                lines.append(
+                    f"Upload: {self.bytes(data['upload'])}/s"
+                )
+
+            if "rx" in data:
+                lines.append(
+                    f"RX total: {self.bytes(data['rx'])}"
+                )
+
+            if "tx" in data:
+                lines.append(
+                    f"TX total: {self.bytes(data['tx'])}"
+                )
+
+            if "packets_rx" in data:
+                lines.append(
+                    f"Packets RX: {data['packets_rx']}"
+                )
+
+            if "packets_tx" in data:
+                lines.append(
+                    f"Packets TX: {data['packets_tx']}"
+                )
+
+            if "errors" in data:
+                lines.append(
+                    f"Errors: {data['errors']}"
+                )
+
+            interfaces = data.get("interfaces")
+
+            if interfaces:
+                lines.append("")
+                lines.append("Interfaces:")
+
+                if isinstance(interfaces, dict):
+                    for name, info in interfaces.items():
+                        lines.append(
+                            f"{name}: {info}"
+                        )
+                else:
+                    for item in interfaces:
+                        lines.append(str(item))
+
+            connections = data.get("connections")
+
+            if connections is not None:
+                lines.append("")
+                lines.append(
+                    f"Connections: {connections}"
+                )
+
+            return "\n".join(lines) or str(data)
+
+        except Exception as e:
+            return f"Network error: {e}"
+
+    def collect_disk(self):
+        try:
+            parts = get_disks()
+            io = get_io()
+            devices = get_devices()
+
+            lines = []
+
+            if parts:
+                lines.append("Partitions:")
+
+                if isinstance(parts, dict):
+                    for name, value in parts.items():
+                        lines.append(
+                            f"{name}: {value}"
+                        )
+                else:
+                    for item in parts:
+                        lines.append(str(item))
+
+            if io:
+                lines.append("")
+                lines.append("I/O:")
+
+                if isinstance(io, dict):
+                    for name, value in io.items():
+                        lines.append(
+                            f"{name}: {value}"
+                        )
+                else:
+                    lines.extend(
+                        str(item)
+                        for item in io
+                    )
+
+            if devices:
+                lines.append("")
+                lines.append("Block devices:")
+
+                if isinstance(devices, dict):
+                    for name, value in devices.items():
+                        lines.append(
+                            f"{name}: {value}"
+                        )
+                else:
+                    lines.extend(
+                        str(item)
+                        for item in devices
+                    )
+
+            return "\n".join(lines) or "No disk data"
+
+        except Exception as e:
+            return f"Disk error: {e}"
+
+    def collect_processes(self):
+        try:
+            data = get_processes()
+
+            if isinstance(data, str):
+                return data
+
+            if isinstance(data, dict):
+                data = data.get(
+                    "processes",
+                    data,
+                )
+
+            if not isinstance(data, list):
+                return str(data)
+
+            lines = [
+                f"{'PID':>7} "
+                f"{'CPU':>6} "
+                f"{'RAM':>6} "
+                f"{'NAME'}"
+            ]
+
+            for item in data[:25]:
+                if isinstance(item, dict):
+                    lines.append(
+                        f"{str(item.get('pid', '')):>7} "
+                        f"{str(item.get('cpu', item.get('cpu_percent', ''))):>6} "
+                        f"{str(item.get('ram', item.get('memory_percent', ''))):>6} "
+                        f"{item.get('name', item.get('process', ''))}"
+                    )
+                else:
+                    lines.append(str(item))
+
+            return "\n".join(lines)
+
+        except Exception as e:
+            return f"Processes error: {e}"
+
+    def generic_collector(self, fn, label):
+        try:
+            data = fn()
+
+            if isinstance(data, str):
+                return data
+
+            if isinstance(data, dict):
+                lines = []
+
+                for key, value in data.items():
+                    lines.append(
+                        f"{key}: {value}"
+                    )
+
+                return "\n".join(lines)
+
+            if isinstance(data, list):
+                return "\n".join(
+                    str(item)
+                    for item in data
+                )
+
+            return str(data)
+
+        except Exception as e:
+            return f"{label} error: {e}"
+
+    def collect_sensors(self):
+        return self.generic_collector(
+            get_sensors,
+            "Sensors",
+        )
+
+    def collect_services(self):
+        data = self.generic_collector(
+            get_services,
+            "Services",
+        )
+        return data[:10000]
+
+    def collect_filesystem(self):
+        return self.generic_collector(
+            get_filesystems,
+            "Filesystem",
+        )
+
+    def collect_usb(self):
+        return self.generic_collector(
+            get_usb,
+            "USB",
+        )
+
+    def collect_pci(self):
+        return self.generic_collector(
+            get_pci,
+            "PCI",
+        )
+
+    def collect_battery(self):
+        return self.generic_collector(
+            get_battery,
+            "Battery",
+        )
+
+    def collect_audio(self):
+        return self.generic_collector(
+            get_audio,
+            "Audio",
+        )
+
+    def collect_bluetooth(self):
+        return self.generic_collector(
+            get_bluetooth,
+            "Bluetooth",
+        )
+
+    def collect_wifi(self):
+        return self.generic_collector(
+            get_wifi,
+            "Wi-Fi",
+        )
+
+    def collect_users(self):
+        return self.generic_collector(
+            get_users,
+            "Users",
+        )
+
+    def collect_logs(self):
+        data = self.generic_collector(
+            get_logs,
+            "Logs",
+        )
+        return data[:12000]
+
+    def collect_kernel(self):
+        return self.generic_collector(
+            get_kernel,
+            "Kernel",
+        )
+
+    def collect_process_tree(self):
+        data = self.generic_collector(
+            get_process_tree,
+            "Process Tree",
+        )
+        return data[:12000]
+
+    def collect_containers(self):
+        return self.generic_collector(
+            get_containers,
+            "Containers",
+        )
+
+    def collect_virtualization(self):
+        return self.generic_collector(
+            get_virtualization,
+            "Virtualization",
+        )
+
+    def collect_packages(self):
+        data = self.generic_collector(
+            get_packages,
+            "Packages",
+        )
+        return data[:12000]
+
+    def collect_mounts(self):
+        return self.generic_collector(
+            get_mounts,
+            "Mounts",
+        )
+
+    def collect_cron(self):
+        try:
+            cron = get_crontab()
+            timers = get_timers()
+
+            return (
+                "Crontab:\n"
+                + str(cron)
+                + "\n\nTimers:\n"
+                + str(timers)
+            )
+
+        except Exception as e:
+            return f"Cron error: {e}"
+
+    def collect_gpu_processes(self):
+        return self.generic_collector(
+            get_gpu_processes,
+            "GPU Processes",
+        )
+
+    def collect_ai(self):
+        return self.generic_collector(
+            get_ai_processes,
+            "AI Processes",
+        )
+
+    def collect_ollama(self):
+        return self.generic_collector(
+            get_ollama,
+            "Ollama",
+        )
+
+    def collect_cuda(self):
+        return self.generic_collector(
+            get_cuda,
+            "CUDA",
+        )
+
+    def collect_pytorch(self):
+        return self.generic_collector(
+            get_pytorch,
+            "PyTorch",
         )
 
 
