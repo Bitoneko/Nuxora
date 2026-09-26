@@ -198,6 +198,7 @@ class Nuxora(App):
                         classes="content",
                     ),
                     classes="panel",
+                    id=f"box-{key}",
                 )
 
         yield Footer()
@@ -241,8 +242,27 @@ class Nuxora(App):
 
     def run_group(self, group):
         for key in group:
-            if self.enabled(key):
+            if self.enabled(key) and self.panel_visible(key):
                 self.run_collector(key)
+
+    def panel_visible(self, key):
+        try:
+            dashboard = self.query_one(
+                "#dashboard",
+                ScrollableContainer,
+            )
+            panel = self.query_one(
+                f"#box-{key}",
+                Vertical,
+            )
+
+            intersection = panel.region.intersection(
+                dashboard.region
+            )
+
+            return intersection.height > 0 and intersection.width > 0
+        except Exception:
+            return False
 
     def run_collector(self, key):
         if key in self.running:
@@ -287,8 +307,9 @@ class Nuxora(App):
     def set_panel_visible(self, key, visible):
         try:
             self.query_one(
-                f"#panel-{key}"
-            ).parent.display = visible
+                f"#box-{key}",
+                Vertical,
+            ).display = visible
         except Exception:
             pass
 
@@ -382,11 +403,7 @@ class Nuxora(App):
 
         b = (
             f"\nBattery   {s['battery']:.0f}%"
-            + (
-                " Charging"
-                if s.get("charging")
-                else ""
-            )
+            + (" Charging" if s.get("charging") else "")
             if s.get("battery") is not None
             else ""
         )
@@ -436,16 +453,14 @@ class Nuxora(App):
         r, s = m["ram"], m["swap"]
 
         return (
-            f"RAM       {self.bytes(r.used)} / "
-            f"{self.bytes(r.total)}\n"
+            f"RAM       {self.bytes(r.used)} / {self.bytes(r.total)}\n"
             f"Usage     {r.percent:5.1f}%\n"
             f"{self.bar(r.percent)}\n\n"
             f"Available {self.bytes(r.available)}\n"
             f"Cached    {self.bytes(getattr(r, 'cached', 0))}\n"
             f"Buffers   {self.bytes(getattr(r, 'buffers', 0))}\n"
             f"Shared    {self.bytes(getattr(r, 'shared', 0))}\n\n"
-            f"SWAP      {self.bytes(s.used)} / "
-            f"{self.bytes(s.total)}\n"
+            f"SWAP      {self.bytes(s.used)} / {self.bytes(s.total)}\n"
             f"Usage     {s.percent:5.1f}%\n"
             f"{self.bar(s.percent)}"
         )
@@ -492,18 +507,10 @@ class Nuxora(App):
         if self.net is None:
             self.net, self.net_time = total, now
 
-        dt = max(
-            now - self.net_time,
-            0.001,
-        )
+        dt = max(now - self.net_time, 0.001)
 
-        rx = (
-            total.bytes_recv - self.net.bytes_recv
-        ) / dt
-
-        tx = (
-            total.bytes_sent - self.net.bytes_sent
-        ) / dt
+        rx = (total.bytes_recv - self.net.bytes_recv) / dt
+        tx = (total.bytes_sent - self.net.bytes_sent) / dt
 
         self.net, self.net_time = total, now
 
@@ -522,8 +529,7 @@ class Nuxora(App):
         ]
 
         lines += [
-            f"{name[:12]:12} "
-            f"↓{self.bytes(i.bytes_recv)} "
+            f"{name[:12]:12} ↓{self.bytes(i.bytes_recv)} "
             f"↑{self.bytes(i.bytes_sent)}"
             for name, i in n["interfaces"].items()
         ]
@@ -542,8 +548,7 @@ class Nuxora(App):
             lines += [
                 d["device"],
                 d["mount"],
-                f"{self.bar(d['percent'])} "
-                f"{d['percent']:5.1f}%",
+                f"{self.bar(d['percent'])} {d['percent']:5.1f}%",
                 f"Used      {self.bytes(d['used'])}",
                 f"Free      {self.bytes(d['free'])}",
                 f"Total     {self.bytes(d['total'])}",
@@ -579,12 +584,9 @@ class Nuxora(App):
         return "\n".join([
             "PID       PROCESS                       CPU      RAM       MEMORY       STATUS",
             *[
-                f"{x['pid']:<9}"
-                f"{x['name'][:28]:<29}"
-                f"{x['cpu']:>5.1f}%   "
-                f"{x['ram']:>5.1f}%   "
-                f"{self.bytes(x['memory']):>10}   "
-                f"{x['status']}"
+                f"{x['pid']:<9}{x['name'][:28]:<29}"
+                f"{x['cpu']:>5.1f}%   {x['ram']:>5.1f}%   "
+                f"{self.bytes(x['memory']):>10}   {x['status']}"
                 for x in p
             ],
         ])
@@ -618,34 +620,28 @@ class Nuxora(App):
 
     def collect_services(self):
         return "\n".join(
-            f"{x['name']:<40} "
-            f"{x['active']:<8} "
-            f"{x['sub']:<10} "
-            f"{x['description']}"
+            f"{x['name']:<40} {x['active']:<8} "
+            f"{x['sub']:<10} {x['description']}"
             for x in get_services()[:100]
         ) or "No services found."
 
     def collect_filesystem(self):
         return "\n".join(
-            f"{x['mount']:<25} "
-            f"{x['fstype']:<8} "
+            f"{x['mount']:<25} {x['fstype']:<8} "
             f"{self.bar(x['percent'], 16)} "
-            f"{x['percent']:5.1f}% "
-            f"{self.bytes(x['free'])} free"
+            f"{x['percent']:5.1f}% {self.bytes(x['free'])} free"
             for x in get_filesystems()
         ) or "No filesystems."
 
     def collect_usb(self):
         return "\n".join(
-            f"{x['bus']}:{x['device']}  "
-            f"{x['id']}  {x['name']}"
+            f"{x['bus']}:{x['device']}  {x['id']}  {x['name']}"
             for x in get_usb()
         ) or "No USB devices."
 
     def collect_pci(self):
         return "\n".join(
-            f"{x['slot']:<15} "
-            f"{x['class']:<25} "
+            f"{x['slot']:<15} {x['class']:<25} "
             f"{x['vendor']} {x['device']}"
             for x in get_pci()
         ) or "No PCI devices."
@@ -659,8 +655,7 @@ class Nuxora(App):
         return (
             f"Charge    {b['percent']:.1f}%\n"
             f"{self.bar(b['percent'])}\n"
-            f"Status    "
-            f"{'Charging / AC' if b['plugged'] else 'Discharging'}\n"
+            f"Status    {'Charging / AC' if b['plugged'] else 'Discharging'}\n"
             f"Time      {self.seconds(b['seconds_left'])}"
         )
 
@@ -689,10 +684,8 @@ class Nuxora(App):
 
     def collect_users(self):
         return "\n".join(
-            f"{x['name']:<20} "
-            f"{str(x['terminal']):<10} "
-            f"{str(x['host']):<20} "
-            f"PID {x['pid']}"
+            f"{x['name']:<20} {str(x['terminal']):<10} "
+            f"{str(x['host']):<20} PID {x['pid']}"
             for x in get_users()
         ) or "No logged-in users."
 
@@ -726,10 +719,8 @@ class Nuxora(App):
 
     def collect_containers(self):
         return "\n".join(
-            f"{x['id'][:12]:12} "
-            f"{x['name']:<20} "
-            f"{x['status']:<25} "
-            f"{x['image']}"
+            f"{x['id'][:12]:12} {x['name']:<20} "
+            f"{x['status']:<25} {x['image']}"
             for x in get_containers()
         ) or "No containers."
 
@@ -755,10 +746,8 @@ class Nuxora(App):
 
     def collect_mounts(self):
         return "\n".join(
-            f"{x['device']:<25} "
-            f"{x['mount']:<30} "
-            f"{x['fstype']:<10} "
-            f"{x['options']}"
+            f"{x['device']:<25} {x['mount']:<30} "
+            f"{x['fstype']:<10} {x['options']}"
             for x in get_mounts()
         ) or "No mounts."
 
@@ -777,26 +766,22 @@ class Nuxora(App):
 
     def collect_gpu_processes(self):
         return "\n".join(
-            f"{x['pid']:<8} "
-            f"{x['name']:<35} "
+            f"{x['pid']:<8} {x['name']:<35} "
             f"{x['vram']:>8} MiB"
             for x in get_gpu_processes()
         ) or "No GPU processes."
 
     def collect_ai(self):
         return "\n".join(
-            f"{x['pid']:<8} "
-            f"{x['name']:<20} "
-            f"CPU {x['cpu']:5.1f}% "
-            f"RAM {self.bytes(x['memory'])}"
+            f"{x['pid']:<8} {x['name']:<20} "
+            f"CPU {x['cpu']:5.1f}% RAM {self.bytes(x['memory'])}"
             for x in get_ai_processes()
         ) or "No AI processes detected."
 
     def collect_ollama(self):
         return "\n".join(
             f"{x.get('name', '?'):<35} "
-            f"{x.get('size', '?')} "
-            f"{x.get('expires_at', '')}"
+            f"{x.get('size', '?')} {x.get('expires_at', '')}"
             for x in get_ollama()
         ) or "Ollama is not running."
 
