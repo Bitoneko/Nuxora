@@ -219,7 +219,6 @@ class Nuxora(App):
         min-height: 3;
         max-height: 3;
         margin-top: 1;
-        shrink: 0;
     }
 
     Static {
@@ -431,45 +430,15 @@ class Nuxora(App):
         )
 
     def action_copy_selection(self):
-        selection = self.get_selection()
+        try:
+            selection = self.screen.get_selection()
+        except Exception:
+            selection = None
 
         if not selection:
             return
 
         self.copy_to_clipboard(selection)
-
-    def get_selection(self):
-        try:
-            widget = self.focused
-
-            if widget is None:
-                return ""
-
-            selection = getattr(
-                widget,
-                "selection",
-                None,
-            )
-
-            if selection is not None:
-                text = str(selection)
-
-                if text.strip():
-                    return text
-
-            text = getattr(
-                widget,
-                "selected_text",
-                "",
-            )
-
-            if text:
-                return str(text)
-
-        except Exception:
-            pass
-
-        return ""
 
     def copy_to_clipboard(self, text):
         try:
