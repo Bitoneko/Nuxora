@@ -1,61 +1,59 @@
-import os
-import time
-import psutil
+import os,time,psutil
 
-MODEL_EXTENSIONS = {
-    ".safetensors", ".ckpt", ".pt", ".pth",
-    ".bin", ".gguf", ".ggml", ".onnx", ".sft"
+MODEL_EXTENSIONS={
+    ".safetensors",".ckpt",".pt",".pth",
+    ".bin",".gguf",".ggml",".onnx",".sft"
 }
 
-SCAN_ROOTS = ["/mnt/data", "/home", "/opt", "/usr/local", "/root"]
-SKIP_DIRS = {
-    ".git", "__pycache__", "node_modules",
-    ".venv", "venv", "site-packages"
+SCAN_ROOTS=["/mnt/data"]
+SKIP_DIRS={
+    ".git","__pycache__","node_modules",
+    ".venv","venv","site-packages"
 }
 
-_model_cache = []
-_model_cache_time = 0
+_cache=[]
+_cache_time=0
 
 
 def _scan_models():
-    global _model_cache, _model_cache_time
+    global _cache,_cache_time
 
-    now = time.monotonic()
-    if now - _model_cache_time < 60:
-        return _model_cache
+    now=time.monotonic()
+    if now-_cache_time<60:
+        return _cache
 
-    out = []
+    out=[]
 
     for root in SCAN_ROOTS:
         if not os.path.exists(root):
             continue
 
         try:
-            for path, dirs, files in os.walk(root, topdown=True):
-                dirs[:] = [d for d in dirs if d not in SKIP_DIRS]
+            for path,dirs,files in os.walk(root,topdown=True):
+                dirs[:]=[d for d in dirs if d not in SKIP_DIRS]
 
                 for name in files:
                     if os.path.splitext(name)[1].lower() not in MODEL_EXTENSIONS:
                         continue
 
-                    file_path = os.path.join(path, name)
+                    file_path=os.path.join(path,name)
 
                     try:
-                        size = os.path.getsize(file_path)
+                        size=os.path.getsize(file_path)
                     except OSError:
-                        size = 0
+                        size=0
 
                     out.append({
-                        "name": name,
-                        "path": file_path,
-                        "size": size
+                        "name":name,
+                        "path":file_path,
+                        "size":size
                     })
-        except (PermissionError, OSError):
+        except (PermissionError,OSError):
             pass
 
-    out.sort(key=lambda x: x["size"], reverse=True)
-    _model_cache = out
-    _model_cache_time = now
+    out.sort(key=lambda x:x["size"],reverse=True)
+    _cache=out
+    _cache_time=now
     return out
 
 
@@ -63,7 +61,9 @@ def get_ai_processes():
     keys=("python","python3","torch","ollama","stable","comfy","forge","cuda")
     out=[]
 
-    for p in psutil.process_iter(["pid","name","cmdline","cpu_percent","memory_info"]):
+    for p in psutil.process_iter(
+        ["pid","name","cmdline","cpu_percent","memory_info"]
+    ):
         try:
             i=p.info
             text=" ".join(i["cmdline"] or []).lower()
