@@ -1,5 +1,7 @@
 import json
 import os
+import shutil
+import subprocess
 import time
 
 from textual.app import App, ComposeResult
@@ -186,13 +188,14 @@ class Nuxora(App):
 
     .panel.maximized {
         height: 40;
-        min-height: 20;
+        min-height: 40;
         max-height: 40;
     }
 
     .panel-title {
         width: 1fr;
         height: 2;
+        min-height: 2;
         text-style: bold;
         color: $accent;
     }
@@ -213,7 +216,10 @@ class Nuxora(App):
     .panel-button {
         width: 100%;
         height: 3;
+        min-height: 3;
+        max-height: 3;
         margin-top: 1;
+        shrink: 0;
     }
 
     Static {
@@ -226,6 +232,7 @@ class Nuxora(App):
         ("q", "quit", "Quit"),
         ("r", "refresh_all", "Refresh"),
         ("ctrl+s", "settings", "Settings"),
+        ("ctrl+c", "copy_selection", "Copy"),
     ]
 
     collectors = [
@@ -422,6 +429,75 @@ class Nuxora(App):
         self.push_screen(
             SettingsScreen(self)
         )
+
+    def action_copy_selection(self):
+        selection = self.get_selection()
+
+        if not selection:
+            return
+
+        self.copy_to_clipboard(selection)
+
+    def get_selection(self):
+        try:
+            widget = self.focused
+
+            if widget is None:
+                return ""
+
+            selection = getattr(
+                widget,
+                "selection",
+                None,
+            )
+
+            if selection is not None:
+                text = str(selection)
+
+                if text.strip():
+                    return text
+
+            text = getattr(
+                widget,
+                "selected_text",
+                "",
+            )
+
+            if text:
+                return str(text)
+
+        except Exception:
+            pass
+
+        return ""
+
+    def copy_to_clipboard(self, text):
+        try:
+            import pyperclip
+
+            pyperclip.copy(text)
+            return
+        except Exception:
+            pass
+
+        commands = [
+            ["xclip", "-selection", "clipboard"],
+            ["xsel", "--clipboard", "--input"],
+        ]
+
+        for command in commands:
+            if shutil.which(command[0]):
+                try:
+                    subprocess.run(
+                        command,
+                        input=text,
+                        text=True,
+                        check=True,
+                        timeout=2,
+                    )
+                    return
+                except Exception:
+                    pass
 
     def on_button_pressed(self, event):
         button_id = event.button.id
