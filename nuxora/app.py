@@ -3,6 +3,7 @@ import os
 import time
 
 from textual.app import App, ComposeResult
+from textual.binding import Binding
 from textual.containers import Horizontal, ScrollableContainer, Vertical
 from textual.screen import ModalScreen
 from textual.widgets import Button, Checkbox, Footer, Header, Static
@@ -231,10 +232,28 @@ class Nuxora(App):
     """
 
     BINDINGS = [
-        ("q", "quit", "Quit"),
-        ("r", "refresh_all", "Refresh"),
-        ("ctrl+s", "settings", "Settings"),
-        ("ctrl+c", "copy", "Copy"),
+        Binding(
+            "q",
+            "quit",
+            "Quit",
+        ),
+        Binding(
+            "r",
+            "refresh_all",
+            "Refresh",
+        ),
+        Binding(
+            "ctrl+s",
+            "settings",
+            "Settings",
+        ),
+        Binding(
+            "ctrl+c",
+            "copy",
+            "Copy",
+            show=True,
+            system=True,
+        ),
     ]
 
     collectors = [
@@ -433,7 +452,7 @@ class Nuxora(App):
         )
 
     def action_copy(self):
-        pass
+        return
 
     def on_button_pressed(self, event):
         button_id = event.button.id
