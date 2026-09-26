@@ -22,26 +22,26 @@ def get_gpu():
                     h, n.NVML_TEMPERATURE_GPU
                 )
             except Exception:
-                temp = 0
+                temp = None
 
             try:
                 power = n.nvmlDeviceGetPowerUsage(h) / 1000
             except Exception:
-                power = 0
+                power = None
 
             try:
                 clock = n.nvmlDeviceGetClockInfo(
                     h, n.NVML_CLOCK_GRAPHICS
                 )
             except Exception:
-                clock = 0
+                clock = None
 
             try:
                 memclock = n.nvmlDeviceGetClockInfo(
                     h, n.NVML_CLOCK_MEM
                 )
             except Exception:
-                memclock = 0
+                memclock = None
 
             try:
                 fan = n.nvmlDeviceGetFanSpeed(h)
