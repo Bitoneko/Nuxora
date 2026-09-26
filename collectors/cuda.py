@@ -1,10 +1,5 @@
 import os,subprocess,time
 
-SCAN_ROOTS=[
-    "/usr/local","/usr","/opt",
-    "/mnt/data","/home","/root"
-]
-
 _cache=None
 _cache_time=0
 
@@ -18,33 +13,29 @@ def _scan_cuda():
 
     out=[]
 
-    for root in SCAN_ROOTS:
+    for root in ["/mnt/data"]:
         if not os.path.exists(root):
             continue
 
         try:
             for path,dirs,files in os.walk(root,topdown=True):
+                dirs[:]=[
+                    d for d in dirs
+                    if d not in {
+                        ".git","__pycache__","node_modules",
+                        ".venv","venv"
+                    }
+                ]
+
                 lower=path.lower()
 
                 if any(x in lower for x in (
-                    "/proc/","/sys/","/dev/","/.git/",
-                    "/node_modules/","/__pycache__/"
-                )):
-                    dirs[:]=[]
-                    continue
-
-                dirs[:]=[
-                    d for d in dirs
-                    if d not in {".git","__pycache__","node_modules",".venv","venv"}
-                ]
-
-                if any(x in lower for x in (
-                    "/cuda","cuda-","/cudnn","cudatoolkit"
+                    "cuda","cudnn","cudatoolkit"
                 )):
                     out.append(path)
 
-                if len(out)>=200:
-                    return out
+                if len(out)>=100:
+                    break
         except (PermissionError,OSError):
             pass
 
@@ -79,13 +70,9 @@ def get_cuda():
                 out.append({
                     "name":p[0],
                     "driver":p[1],
-                    "cuda":p[2]
+                    "cuda":p[2],
+                    "paths":_scan_cuda()
                 })
-
-        paths=_scan_cuda()
-
-        for gpu in out:
-            gpu["paths"]=paths
 
         return out
 
