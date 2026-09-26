@@ -3,7 +3,6 @@ import os
 import time
 
 from textual.app import App, ComposeResult
-from textual.binding import Binding
 from textual.containers import Horizontal, ScrollableContainer, Vertical
 from textual.screen import ModalScreen
 from textual.widgets import Button, Checkbox, Header, Static
@@ -159,8 +158,10 @@ class NuxoraFooter(Static):
         dock: bottom;
         width: 100%;
         height: 1;
-        background: $footer;
-        color: $footer-foreground;
+        min-height: 1;
+        max-height: 1;
+        background: $surface;
+        color: $text;
         content-align: left middle;
         padding: 0 1;
     }
@@ -248,24 +249,6 @@ class Nuxora(App):
         height: auto;
     }
     """
-
-    BINDINGS = [
-        Binding(
-            "q",
-            "quit",
-            "Quit",
-        ),
-        Binding(
-            "r",
-            "refresh_all",
-            "Refresh",
-        ),
-        Binding(
-            "ctrl+s",
-            "settings",
-            "Settings",
-        ),
-    ]
 
     collectors = [
         ("system", "System"),
