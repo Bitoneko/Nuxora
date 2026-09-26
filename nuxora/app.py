@@ -253,6 +253,7 @@ class Nuxora(App):
             "ctrl+c",
             "copy",
             "Copy",
+            priority=True,
         ),
     ]
 
@@ -452,7 +453,10 @@ class Nuxora(App):
         )
 
     def action_copy(self):
-        self.screen.action_copy_text()
+        selected = self.screen.get_selected_text()
+
+        if selected:
+            self.copy_to_clipboard(selected)
 
     def on_button_pressed(self, event):
         button_id = event.button.id
