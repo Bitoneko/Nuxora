@@ -88,7 +88,6 @@ class SettingsScreen(ModalScreen):
 
 class Nuxora(App):
     TITLE = "Nuxora"
-    SUB_TITLE = "Real-time Linux System Monitor"
 
     CSS = """
     Screen { background: $background; }
