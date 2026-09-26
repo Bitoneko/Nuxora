@@ -5,11 +5,6 @@ MODEL_EXTENSIONS={
     ".bin",".onnx",".gguf",".ggml"
 }
 
-SCAN_ROOTS=[
-    "/mnt/data","/home","/opt",
-    "/usr/local","/root"
-]
-
 _cache=None
 _cache_time=0
 
@@ -23,7 +18,7 @@ def _scan_models():
 
     out=[]
 
-    for root in SCAN_ROOTS:
+    for root in ["/mnt/data"]:
         if not os.path.exists(root):
             continue
 
@@ -56,7 +51,6 @@ def _scan_models():
             pass
 
     out.sort(key=lambda x:x["size"],reverse=True)
-
     _cache=out
     _cache_time=now
     return out
