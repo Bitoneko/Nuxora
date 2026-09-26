@@ -43,7 +43,7 @@ class SettingsScreen(ModalScreen):
     CSS = """
     SettingsScreen {
         align: center middle;
-        background: rgba(0,0,0,.7);
+        background: $background 80%;
     }
     #settings {
         width: 60%;
