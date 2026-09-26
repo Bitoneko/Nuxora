@@ -160,6 +160,7 @@ class SettingsScreen(ModalScreen):
 class Nuxora(App):
     TITLE = "Nuxora"
 
+    ALLOW_SELECT = True
     inherit_bindings = False
 
     CSS = """
@@ -253,7 +254,9 @@ class Nuxora(App):
             "ctrl+c",
             "copy",
             "Copy",
+            show=True,
             priority=True,
+            system=True,
         ),
     ]
 
@@ -455,8 +458,11 @@ class Nuxora(App):
     def action_copy(self):
         selected = self.screen.get_selected_text()
 
-        if selected:
-            self.copy_to_clipboard(selected)
+        if not selected:
+            return
+
+        self.copy_to_clipboard(selected)
+        self.screen.clear_selection()
 
     def on_button_pressed(self, event):
         button_id = event.button.id
