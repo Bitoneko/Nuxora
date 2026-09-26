@@ -1,11 +1,5 @@
 import json,os,time,urllib.request
 
-SCAN_ROOTS=[
-    "/mnt/data","/home","/opt",
-    "/usr/share","/usr/local/share",
-    "/var/lib/ollama"
-]
-
 _cache=[]
 _cache_time=0
 
@@ -19,19 +13,25 @@ def _scan_models():
 
     out=[]
 
-    for root in SCAN_ROOTS:
+    for root in ["/mnt/data"]:
         if not os.path.exists(root):
             continue
 
         try:
             for path,dirs,files in os.walk(root,topdown=True):
-                if "ollama" not in path.lower() and root in ("/mnt/data","/home","/opt"):
-                    dirs[:]=[d for d in dirs if "ollama" in d.lower()]
-
                 dirs[:]=[
                     d for d in dirs
-                    if d not in {".git","__pycache__","node_modules",".venv","venv"}
+                    if d not in {
+                        ".git","__pycache__","node_modules",
+                        ".venv","venv"
+                    }
                 ]
+
+                if "ollama" not in path.lower():
+                    dirs[:]=[
+                        d for d in dirs
+                        if "ollama" in d.lower()
+                    ]
 
                 for name in files:
                     if name!="manifest.json" and "ollama" not in path.lower():
@@ -62,17 +62,16 @@ def get_ollama():
         with urllib.request.urlopen(
             "http://127.0.0.1:11434/api/ps",timeout=2
         ) as r:
-            models=json.load(r).get("models",[])
+            return json.load(r).get("models",[])
     except Exception:
-        models=[]
+        pass
 
-    if not models:
-        try:
-            with urllib.request.urlopen(
-                "http://127.0.0.1:11434/api/tags",timeout=2
-            ) as r:
-                models=json.load(r).get("models",[])
-        except Exception:
-            pass
+    try:
+        with urllib.request.urlopen(
+            "http://127.0.0.1:11434/api/tags",timeout=2
+        ) as r:
+            return json.load(r).get("models",[])
+    except Exception:
+        pass
 
-    return models or _scan_models()
+    return _scan_models()
