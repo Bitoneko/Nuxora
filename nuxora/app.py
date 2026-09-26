@@ -6,7 +6,7 @@ from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, ScrollableContainer, Vertical
 from textual.screen import ModalScreen
-from textual.widgets import Button, Checkbox, Footer, Header, Static
+from textual.widgets import Button, Checkbox, Header, Static
 
 from collectors.ai import get_ai_processes
 from collectors.audio import get_audio
@@ -146,15 +146,30 @@ class SettingsScreen(ModalScreen):
             ).value
 
             self.main_app.collector_visibility[key] = value
-
-            self.main_app.set_panel_visible(
-                key,
-                value,
-            )
+            self.main_app.set_panel_visible(key, value)
 
         self.main_app.save_visibility()
         self.main_app.refresh_all()
         self.dismiss()
+
+
+class NuxoraFooter(Static):
+    DEFAULT_CSS = """
+    NuxoraFooter {
+        dock: bottom;
+        width: 100%;
+        height: 1;
+        background: $footer;
+        color: $footer-foreground;
+        content-align: left middle;
+        padding: 0 1;
+    }
+    """
+
+    def on_mount(self):
+        self.update(
+            "q Quit    r Refresh    ^s Settings    ^c Copy"
+        )
 
 
 class Nuxora(App):
@@ -249,14 +264,6 @@ class Nuxora(App):
             "ctrl+s",
             "settings",
             "Settings",
-        ),
-        Binding(
-            "ctrl+c",
-            "copy",
-            "Copy",
-            show=True,
-            priority=True,
-            system=True,
         ),
     ]
 
@@ -414,7 +421,7 @@ class Nuxora(App):
                         id=f"box-{key}",
                     )
 
-        yield Footer()
+        yield NuxoraFooter()
 
     def on_mount(self):
         self.load_theme()
@@ -442,6 +449,27 @@ class Nuxora(App):
             self.update_slow,
         )
 
+    def on_key(self, event):
+        if event.key == "ctrl+c":
+            event.stop()
+            self.action_copy()
+            return
+
+        if event.key == "q":
+            event.stop()
+            self.action_quit()
+            return
+
+        if event.key == "r":
+            event.stop()
+            self.action_refresh_all()
+            return
+
+        if event.key == "ctrl+s":
+            event.stop()
+            self.action_settings()
+            return
+
     def action_quit(self):
         self.save_theme()
         self.save_visibility()
@@ -456,13 +484,19 @@ class Nuxora(App):
         )
 
     def action_copy(self):
-        selected = self.screen.get_selected_text()
+        try:
+            selected = self.screen.get_selected_text()
+        except Exception:
+            selected = ""
 
         if not selected:
             return
 
-        self.copy_to_clipboard(selected)
-        self.screen.clear_selection()
+        try:
+            self.copy_to_clipboard(selected)
+            self.screen.clear_selection()
+        except Exception:
+            pass
 
     def on_button_pressed(self, event):
         button_id = event.button.id
@@ -474,6 +508,7 @@ class Nuxora(App):
             key = button_id.removeprefix(
                 "maximize-"
             )
+
             self.toggle_panel(key)
 
     def toggle_panel(self, key):
@@ -1144,10 +1179,8 @@ class Nuxora(App):
         ) or "No mounts."
 
     def collect_cron(self):
-        t, c = (
-            get_timers(),
-            get_crontab(),
-        )
+        t = get_timers()
+        c = get_crontab()
 
         if not t and not c:
             return "No timers or crontab."
