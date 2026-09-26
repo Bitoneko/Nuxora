@@ -3,7 +3,7 @@ import os
 import time
 
 from textual.app import App, ComposeResult
-from textual.containers import Horizontal, ScrollableContainer, Vertical
+from textual.containers import Grid, Horizontal, ScrollableContainer, Vertical
 from textual.screen import ModalScreen
 from textual.widgets import Button, Checkbox, Footer, Header, Static
 
@@ -41,13 +41,37 @@ from collectors.wifi import get_wifi
 
 class SettingsScreen(ModalScreen):
     CSS = """
-    SettingsScreen { align: center middle; background: $background 80%; }
-    #settings { width: 60%; height: 80%; border: solid $accent;
-        background: $surface; padding: 1 2; }
-    #settings-title { height: 3; text-style: bold; }
-    #checks { height: 1fr; overflow: auto; }
-    #buttons { height: 3; align: right middle; }
-    Button { margin-left: 1; }
+    SettingsScreen {
+        align: center middle;
+        background: $background 80%;
+    }
+
+    #settings {
+        width: 60%;
+        height: 80%;
+        border: solid $accent;
+        background: $surface;
+        padding: 1 2;
+    }
+
+    #settings-title {
+        height: 3;
+        text-style: bold;
+    }
+
+    #checks {
+        height: 1fr;
+        overflow: auto;
+    }
+
+    #buttons {
+        height: 3;
+        align: right middle;
+    }
+
+    Button {
+        margin-left: 1;
+    }
     """
 
     def __init__(self, app):
@@ -57,6 +81,7 @@ class SettingsScreen(ModalScreen):
     def compose(self):
         with Vertical(id="settings"):
             yield Static("NUXORA DISPLAY SETTINGS", id="settings-title")
+
             with ScrollableContainer(id="checks"):
                 for key, name in self.main_app.collectors:
                     yield Checkbox(
@@ -64,22 +89,47 @@ class SettingsScreen(ModalScreen):
                         value=self.main_app.enabled(key),
                         id=f"check-{key}",
                     )
+
             with Horizontal(id="buttons"):
+                yield Button("Show All", id="show-all")
+                yield Button("Hide All", id="hide-all")
                 yield Button("Apply", variant="primary", id="apply")
                 yield Button("Cancel", id="cancel")
 
     def on_button_pressed(self, event):
-        if event.button.id == "cancel":
+        button_id = event.button.id
+
+        if button_id == "cancel":
             self.dismiss()
             return
 
+        if button_id == "show-all":
+            for key, _ in self.main_app.collectors:
+                self.query_one(
+                    f"#check-{key}",
+                    Checkbox,
+                ).value = True
+            return
+
+        if button_id == "hide-all":
+            for key, _ in self.main_app.collectors:
+                self.query_one(
+                    f"#check-{key}",
+                    Checkbox,
+                ).value = False
+            return
+
+        if button_id != "apply":
+            return
+
         for key, _ in self.main_app.collectors:
-            self.main_app.collector_visibility[key] = (
-                self.query_one(f"#check-{key}", Checkbox).value
-            )
-            self.main_app.set_panel_visible(
-                key, self.main_app.enabled(key)
-            )
+            value = self.query_one(
+                f"#check-{key}",
+                Checkbox,
+            ).value
+
+            self.main_app.collector_visibility[key] = value
+            self.main_app.set_panel_visible(key, value)
 
         self.main_app.save_visibility()
         self.main_app.refresh_all()
@@ -90,19 +140,49 @@ class Nuxora(App):
     TITLE = "Nuxora"
 
     CSS = """
-    Screen { background: $background; }
-    #dashboard { height: 1fr; padding: 0 1; }
+    Screen {
+        background: $background;
+    }
+
+    #dashboard {
+        height: 1fr;
+        padding: 0 1;
+        overflow: auto;
+    }
+
+    #grid {
+        width: 100%;
+        height: auto;
+        grid-size: 3;
+        grid-columns: 1fr 1fr 1fr;
+        grid-rows: auto;
+        column-gap: 1;
+        row-gap: 1;
+    }
+
     .panel {
         width: 1fr;
-        min-height: 10;
-        max-height: 24;
+        height: auto;
+        min-height: 6;
         border: solid $accent;
         padding: 0 1;
-        margin: 0 1 1 0;
     }
-    .title { height: 2; text-style: bold; color: $accent; }
-    .content { height: 1fr; overflow: hidden; }
-    Static { height: auto; }
+
+    .title {
+        height: 2;
+        text-style: bold;
+        color: $accent;
+    }
+
+    .content {
+        width: 1fr;
+        height: auto;
+    }
+
+    Static {
+        height: auto;
+        width: 1fr;
+    }
     """
 
     BINDINGS = [
@@ -112,42 +192,89 @@ class Nuxora(App):
     ]
 
     collectors = [
-        ("system", "System"), ("cpu", "CPU"), ("memory", "Memory"),
-        ("gpu", "GPU"), ("disk", "Disk"), ("network", "Network"),
-        ("processes", "Processes"), ("sensors", "Sensors"),
-        ("services", "Services"), ("filesystem", "Filesystem"),
-        ("usb", "USB"), ("pci", "PCI"), ("battery", "Battery"),
-        ("audio", "Audio"), ("bluetooth", "Bluetooth"), ("wifi", "Wi-Fi"),
-        ("users", "Users"), ("logs", "Logs"), ("kernel", "Kernel"),
-        ("process_tree", "Process Tree"), ("containers", "Containers"),
-        ("virtualization", "Virtualization"), ("packages", "Packages"),
-        ("mounts", "Mounts"), ("cron", "Cron / Timers"),
-        ("gpu_processes", "GPU Processes"), ("ai", "AI Processes"),
-        ("ollama", "Ollama"), ("cuda", "CUDA"), ("pytorch", "PyTorch"),
+        ("system", "System"),
+        ("cpu", "CPU"),
+        ("memory", "Memory"),
+        ("gpu", "GPU"),
+        ("disk", "Disk"),
+        ("network", "Network"),
+        ("processes", "Processes"),
+        ("sensors", "Sensors"),
+        ("services", "Services"),
+        ("filesystem", "Filesystem"),
+        ("usb", "USB"),
+        ("pci", "PCI"),
+        ("battery", "Battery"),
+        ("audio", "Audio"),
+        ("bluetooth", "Bluetooth"),
+        ("wifi", "Wi-Fi"),
+        ("users", "Users"),
+        ("logs", "Logs"),
+        ("kernel", "Kernel"),
+        ("process_tree", "Process Tree"),
+        ("containers", "Containers"),
+        ("virtualization", "Virtualization"),
+        ("packages", "Packages"),
+        ("mounts", "Mounts"),
+        ("cron", "Cron / Timers"),
+        ("gpu_processes", "GPU Processes"),
+        ("ai", "AI Processes"),
+        ("ollama", "Ollama"),
+        ("cuda", "CUDA"),
+        ("pytorch", "PyTorch"),
     ]
 
-    fast = {"system", "cpu", "memory", "gpu", "network"}
+    fast = {
+        "system",
+        "cpu",
+        "memory",
+        "gpu",
+        "network",
+    }
 
     medium = {
-        "disk", "processes", "sensors", "battery", "wifi",
-        "gpu_processes", "ai", "pytorch",
+        "disk",
+        "processes",
+        "sensors",
+        "battery",
+        "wifi",
+        "gpu_processes",
+        "ai",
+        "pytorch",
     }
 
     slow = {
-        "services", "filesystem", "usb", "pci", "audio", "bluetooth",
-        "users", "logs", "kernel", "process_tree", "containers",
-        "virtualization", "packages", "mounts", "cron", "ollama", "cuda",
+        "services",
+        "filesystem",
+        "usb",
+        "pci",
+        "audio",
+        "bluetooth",
+        "users",
+        "logs",
+        "kernel",
+        "process_tree",
+        "containers",
+        "virtualization",
+        "packages",
+        "mounts",
+        "cron",
+        "ollama",
+        "cuda",
     }
 
     def __init__(self):
         super().__init__()
 
         base = os.path.expanduser("~/.config/nuxora")
+
         self.visibility_path = f"{base}/visibility.json"
         self.theme_path = f"{base}/theme.json"
 
         self.collector_visibility = self.load_visibility()
+
         self.running = set()
+
         self.net = None
         self.net_time = time.monotonic()
 
@@ -188,17 +315,21 @@ class Nuxora(App):
         yield Header()
 
         with ScrollableContainer(id="dashboard"):
-            for key, name in self.collectors:
-                yield Vertical(
-                    Static(name.upper(), classes="title"),
-                    Static(
-                        "Waiting...",
-                        id=f"panel-{key}",
-                        classes="content",
-                    ),
-                    classes="panel",
-                    id=f"box-{key}",
-                )
+            with Grid(id="grid"):
+                for key, name in self.collectors:
+                    yield Vertical(
+                        Static(
+                            name.upper(),
+                            classes="title",
+                        ),
+                        Static(
+                            "Waiting...",
+                            id=f"panel-{key}",
+                            classes="content",
+                        ),
+                        classes="panel",
+                        id=f"box-{key}",
+                    )
 
         yield Footer()
 
@@ -206,13 +337,27 @@ class Nuxora(App):
         self.load_theme()
 
         for key, _ in self.collectors:
-            self.set_panel_visible(key, self.enabled(key))
+            self.set_panel_visible(
+                key,
+                self.enabled(key),
+            )
 
         self.refresh_all()
 
-        self.set_interval(1, self.update_fast)
-        self.set_interval(3, self.update_medium)
-        self.set_interval(10, self.update_slow)
+        self.set_interval(
+            1,
+            self.update_fast,
+        )
+
+        self.set_interval(
+            3,
+            self.update_medium,
+        )
+
+        self.set_interval(
+            10,
+            self.update_slow,
+        )
 
     def action_quit(self):
         self.save_theme()
@@ -223,7 +368,9 @@ class Nuxora(App):
         self.refresh_all()
 
     def action_settings(self):
-        self.push_screen(SettingsScreen(self))
+        self.push_screen(
+            SettingsScreen(self)
+        )
 
     def refresh_all(self):
         self.update_fast()
@@ -241,27 +388,8 @@ class Nuxora(App):
 
     def run_group(self, group):
         for key in group:
-            if self.enabled(key) and self.panel_visible(key):
+            if self.enabled(key):
                 self.run_collector(key)
-
-    def panel_visible(self, key):
-        try:
-            dashboard = self.query_one(
-                "#dashboard",
-                ScrollableContainer,
-            )
-            panel = self.query_one(
-                f"#box-{key}",
-                Vertical,
-            )
-
-            intersection = panel.region.intersection(
-                dashboard.region
-            )
-
-            return intersection.height > 0 and intersection.width > 0
-        except Exception:
-            return False
 
     def run_collector(self, key):
         if key in self.running:
@@ -278,12 +406,14 @@ class Nuxora(App):
     def worker(self, key):
         try:
             result = self.jobs[key]()
+
             self.call_from_thread(
                 self.finished,
                 key,
                 result,
                 None,
             )
+
         except Exception as e:
             self.call_from_thread(
                 self.finished,
@@ -296,12 +426,21 @@ class Nuxora(App):
         self.running.discard(key)
 
         if error:
-            self.set(key, f"Collector error: {error}")
+            self.set(
+                key,
+                f"Collector error: {error}",
+            )
         elif result is not None:
-            self.set(key, result)
+            self.set(
+                key,
+                result,
+            )
 
     def enabled(self, key):
-        return self.collector_visibility.get(key, True)
+        return self.collector_visibility.get(
+            key,
+            True,
+        )
 
     def set_panel_visible(self, key, visible):
         try:
@@ -335,11 +474,14 @@ class Nuxora(App):
                 data = json.load(f)
 
             if isinstance(data, dict):
-                result.update({
-                    k: bool(v)
-                    for k, v in data.items()
-                    if k in result
-                })
+                result.update(
+                    {
+                        k: bool(v)
+                        for k, v in data.items()
+                        if k in result
+                    }
+                )
+
         except Exception:
             pass
 
@@ -348,7 +490,9 @@ class Nuxora(App):
     def save_visibility(self):
         try:
             os.makedirs(
-                os.path.dirname(self.visibility_path),
+                os.path.dirname(
+                    self.visibility_path
+                ),
                 exist_ok=True,
             )
 
@@ -362,6 +506,7 @@ class Nuxora(App):
                     f,
                     indent=2,
                 )
+
         except Exception:
             pass
 
@@ -375,13 +520,16 @@ class Nuxora(App):
 
             if theme in self.available_themes:
                 self.theme = theme
+
         except Exception:
             pass
 
     def save_theme(self):
         try:
             os.makedirs(
-                os.path.dirname(self.theme_path),
+                os.path.dirname(
+                    self.theme_path
+                ),
                 exist_ok=True,
             )
 
@@ -390,7 +538,11 @@ class Nuxora(App):
                 "w",
                 encoding="utf-8",
             ) as f:
-                json.dump({"theme": self.theme}, f)
+                json.dump(
+                    {"theme": self.theme},
+                    f,
+                )
+
         except Exception:
             pass
 
@@ -402,7 +554,11 @@ class Nuxora(App):
 
         b = (
             f"\nBattery   {s['battery']:.0f}%"
-            + (" Charging" if s.get("charging") else "")
+            + (
+                " Charging"
+                if s.get("charging")
+                else ""
+            )
             if s.get("battery") is not None
             else ""
         )
@@ -452,14 +608,16 @@ class Nuxora(App):
         r, s = m["ram"], m["swap"]
 
         return (
-            f"RAM       {self.bytes(r.used)} / {self.bytes(r.total)}\n"
+            f"RAM       {self.bytes(r.used)} / "
+            f"{self.bytes(r.total)}\n"
             f"Usage     {r.percent:5.1f}%\n"
             f"{self.bar(r.percent)}\n\n"
             f"Available {self.bytes(r.available)}\n"
             f"Cached    {self.bytes(getattr(r, 'cached', 0))}\n"
             f"Buffers   {self.bytes(getattr(r, 'buffers', 0))}\n"
             f"Shared    {self.bytes(getattr(r, 'shared', 0))}\n\n"
-            f"SWAP      {self.bytes(s.used)} / {self.bytes(s.total)}\n"
+            f"SWAP      {self.bytes(s.used)} / "
+            f"{self.bytes(s.total)}\n"
             f"Usage     {s.percent:5.1f}%\n"
             f"{self.bar(s.percent)}"
         )
@@ -484,7 +642,8 @@ class Nuxora(App):
                 f"GPU       {g['gpu']:5.1f}%",
                 f"VRAM      {self.bytes(g['vram_used'])} / "
                 f"{self.bytes(g['vram_total'])}",
-                f"Usage     {u:5.1f}%\n{self.bar(u)}",
+                f"Usage     {u:5.1f}%\n"
+                f"{self.bar(u)}",
                 f"Temp      {g.get('temp', 0)}°C",
                 f"Power     {g.get('power', 0):.1f} W",
                 f"Clock     {g.get('clock', 0)} MHz",
@@ -492,7 +651,9 @@ class Nuxora(App):
             ]
 
             if g.get("fan") is not None:
-                lines.append(f"Fan       {g['fan']}%")
+                lines.append(
+                    f"Fan       {g['fan']}%"
+                )
 
             if i < len(gpus) - 1:
                 lines.append("")
@@ -501,17 +662,28 @@ class Nuxora(App):
 
     def collect_network(self):
         n = get_network()
-        total, now = n["total"], time.monotonic()
+        total = n["total"]
+        now = time.monotonic()
 
         if self.net is None:
-            self.net, self.net_time = total, now
+            self.net = total
+            self.net_time = now
 
-        dt = max(now - self.net_time, 0.001)
+        dt = max(
+            now - self.net_time,
+            0.001,
+        )
 
-        rx = (total.bytes_recv - self.net.bytes_recv) / dt
-        tx = (total.bytes_sent - self.net.bytes_sent) / dt
+        rx = (
+            total.bytes_recv - self.net.bytes_recv
+        ) / dt
 
-        self.net, self.net_time = total, now
+        tx = (
+            total.bytes_sent - self.net.bytes_sent
+        ) / dt
+
+        self.net = total
+        self.net_time = now
 
         lines = [
             f"Download   {self.bytes(rx)}/s",
@@ -528,13 +700,15 @@ class Nuxora(App):
         ]
 
         lines += [
-            f"{name[:12]:12} ↓{self.bytes(i.bytes_recv)} "
+            f"{name[:12]:12} "
+            f"↓{self.bytes(i.bytes_recv)} "
             f"↑{self.bytes(i.bytes_sent)}"
             for name, i in n["interfaces"].items()
         ]
 
         return "\n".join(
-            lines + [
+            lines
+            + [
                 "",
                 f"Connections {len(n['connections'])}",
             ]
@@ -547,7 +721,8 @@ class Nuxora(App):
             lines += [
                 d["device"],
                 d["mount"],
-                f"{self.bar(d['percent'])} {d['percent']:5.1f}%",
+                f"{self.bar(d['percent'])} "
+                f"{d['percent']:5.1f}%",
                 f"Used      {self.bytes(d['used'])}",
                 f"Free      {self.bytes(d['free'])}",
                 f"Total     {self.bytes(d['total'])}",
@@ -567,6 +742,7 @@ class Nuxora(App):
 
         if devices:
             lines.append("\nBLOCK DEVICES")
+
             lines += [
                 f"{d.get('path', d.get('name', '?')):16} "
                 f"{d.get('size', '?'):>9} "
@@ -580,18 +756,25 @@ class Nuxora(App):
     def collect_processes(self):
         p = get_processes()[:25]
 
-        return "\n".join([
-            "PID       PROCESS                       CPU      RAM       MEMORY       STATUS",
-            *[
-                f"{x['pid']:<9}{x['name'][:28]:<29}"
-                f"{x['cpu']:>5.1f}%   {x['ram']:>5.1f}%   "
-                f"{self.bytes(x['memory']):>10}   {x['status']}"
-                for x in p
-            ],
-        ])
+        return "\n".join(
+            [
+                "PID       PROCESS                       "
+                "CPU      RAM       MEMORY       STATUS",
+                *[
+                    f"{x['pid']:<9}"
+                    f"{x['name'][:28]:<29}"
+                    f"{x['cpu']:>5.1f}%   "
+                    f"{x['ram']:>5.1f}%   "
+                    f"{self.bytes(x['memory']):>10}   "
+                    f"{x['status']}"
+                    for x in p
+                ],
+            ]
+        )
 
     def collect_sensors(self):
-        s, lines = get_sensors(), []
+        s = get_sensors()
+        lines = []
 
         for chip, items in s["temperatures"].items():
             lines.append(chip)
@@ -619,28 +802,35 @@ class Nuxora(App):
 
     def collect_services(self):
         return "\n".join(
-            f"{x['name']:<40} {x['active']:<8} "
-            f"{x['sub']:<10} {x['description']}"
+            f"{x['name']:<40} "
+            f"{x['active']:<8} "
+            f"{x['sub']:<10} "
+            f"{x['description']}"
             for x in get_services()[:100]
         ) or "No services found."
 
     def collect_filesystem(self):
         return "\n".join(
-            f"{x['mount']:<25} {x['fstype']:<8} "
+            f"{x['mount']:<25} "
+            f"{x['fstype']:<8} "
             f"{self.bar(x['percent'], 16)} "
-            f"{x['percent']:5.1f}% {self.bytes(x['free'])} free"
+            f"{x['percent']:5.1f}% "
+            f"{self.bytes(x['free'])} free"
             for x in get_filesystems()
         ) or "No filesystems."
 
     def collect_usb(self):
         return "\n".join(
-            f"{x['bus']}:{x['device']}  {x['id']}  {x['name']}"
+            f"{x['bus']}:{x['device']}  "
+            f"{x['id']}  "
+            f"{x['name']}"
             for x in get_usb()
         ) or "No USB devices."
 
     def collect_pci(self):
         return "\n".join(
-            f"{x['slot']:<15} {x['class']:<25} "
+            f"{x['slot']:<15} "
+            f"{x['class']:<25} "
             f"{x['vendor']} {x['device']}"
             for x in get_pci()
         ) or "No PCI devices."
@@ -654,12 +844,17 @@ class Nuxora(App):
         return (
             f"Charge    {b['percent']:.1f}%\n"
             f"{self.bar(b['percent'])}\n"
-            f"Status    {'Charging / AC' if b['plugged'] else 'Discharging'}\n"
-            f"Time      {self.seconds(b['seconds_left'])}"
+            f"Status    "
+            f"{'Charging / AC' if b['plugged'] else 'Discharging'}\n"
+            f"Time      "
+            f"{self.seconds(b['seconds_left'])}"
         )
 
     def collect_audio(self):
-        return "\n".join(get_audio()) or "No audio information."
+        return (
+            "\n".join(get_audio())
+            or "No audio information."
+        )
 
     def collect_bluetooth(self):
         return "\n".join(
@@ -677,19 +872,26 @@ class Nuxora(App):
             )
 
             if x.get("link"):
-                lines.append(f"  {x['link']}")
+                lines.append(
+                    f"  {x['link']}"
+                )
 
         return "\n".join(lines) or "No Wi-Fi interfaces."
 
     def collect_users(self):
         return "\n".join(
-            f"{x['name']:<20} {str(x['terminal']):<10} "
-            f"{str(x['host']):<20} PID {x['pid']}"
+            f"{x['name']:<20} "
+            f"{str(x['terminal']):<10} "
+            f"{str(x['host']):<20} "
+            f"PID {x['pid']}"
             for x in get_users()
         ) or "No logged-in users."
 
     def collect_logs(self):
-        return "\n".join(get_logs(20)) or "No logs."
+        return (
+            "\n".join(get_logs(20))
+            or "No logs."
+        )
 
     def collect_kernel(self):
         k = get_kernel()
@@ -712,14 +914,22 @@ class Nuxora(App):
                     f"{x['name']}({x['pid']})"
                     for x in children[:8]
                 )
-                lines.append(f"{pid:<8} → {names}")
 
-        return "\n".join(lines[:80]) or "No process tree."
+                lines.append(
+                    f"{pid:<8} → {names}"
+                )
+
+        return (
+            "\n".join(lines[:80])
+            or "No process tree."
+        )
 
     def collect_containers(self):
         return "\n".join(
-            f"{x['id'][:12]:12} {x['name']:<20} "
-            f"{x['status']:<25} {x['image']}"
+            f"{x['id'][:12]:12} "
+            f"{x['name']:<20} "
+            f"{x['status']:<25} "
+            f"{x['image']}"
             for x in get_containers()
         ) or "No containers."
 
@@ -745,8 +955,10 @@ class Nuxora(App):
 
     def collect_mounts(self):
         return "\n".join(
-            f"{x['device']:<25} {x['mount']:<30} "
-            f"{x['fstype']:<10} {x['options']}"
+            f"{x['device']:<25} "
+            f"{x['mount']:<30} "
+            f"{x['fstype']:<10} "
+            f"{x['options']}"
             for x in get_mounts()
         ) or "No mounts."
 
@@ -765,22 +977,26 @@ class Nuxora(App):
 
     def collect_gpu_processes(self):
         return "\n".join(
-            f"{x['pid']:<8} {x['name']:<35} "
+            f"{x['pid']:<8} "
+            f"{x['name']:<35} "
             f"{x['vram']:>8} MiB"
             for x in get_gpu_processes()
         ) or "No GPU processes."
 
     def collect_ai(self):
         return "\n".join(
-            f"{x['pid']:<8} {x['name']:<20} "
-            f"CPU {x['cpu']:5.1f}% RAM {self.bytes(x['memory'])}"
+            f"{x['pid']:<8} "
+            f"{x['name']:<20} "
+            f"CPU {x['cpu']:5.1f}% "
+            f"RAM {self.bytes(x['memory'])}"
             for x in get_ai_processes()
         ) or "No AI processes detected."
 
     def collect_ollama(self):
         return "\n".join(
             f"{x.get('name', '?'):<35} "
-            f"{x.get('size', '?')} {x.get('expires_at', '')}"
+            f"{x.get('size', '?')} "
+            f"{x.get('expires_at', '')}"
             for x in get_ollama()
         ) or "Ollama is not running."
 
@@ -801,9 +1017,12 @@ class Nuxora(App):
         x = get_pytorch()
 
         lines = [
-            f"PyTorch   {x['version'] or 'not installed'}",
-            f"CUDA      {x['cuda'] or 'none'}",
-            f"Available {'YES' if x['available'] else 'NO'}",
+            f"PyTorch   "
+            f"{x['version'] or 'not installed'}",
+            f"CUDA      "
+            f"{x['cuda'] or 'none'}",
+            f"Available "
+            f"{'YES' if x['available'] else 'NO'}",
         ]
 
         for g in x["gpus"]:
@@ -817,17 +1036,34 @@ class Nuxora(App):
 
     @staticmethod
     def bar(value, width=18):
-        value = max(0, min(100, float(value)))
-        n = int(width * value / 100)
-        return "█" * n + "░" * (width - n)
+        value = max(
+            0,
+            min(100, float(value)),
+        )
+
+        n = int(
+            width * value / 100
+        )
+
+        return (
+            "█" * n
+            + "░" * (width - n)
+        )
 
     @staticmethod
     def bytes(value):
         value = float(value)
 
-        for unit in ("B", "KB", "MB", "GB", "TB"):
+        for unit in (
+            "B",
+            "KB",
+            "MB",
+            "GB",
+            "TB",
+        ):
             if abs(value) < 1024:
                 return f"{value:.1f} {unit}"
+
             value /= 1024
 
         return f"{value:.1f} PB"
