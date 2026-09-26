@@ -19,4 +19,4 @@ dependencies = [
 nuxora = "nuxora.__main__:main"
 
 [tool.setuptools.packages.find]
-include = ["nuxora*"]
+include = ["nuxora*", "collectors*"]
