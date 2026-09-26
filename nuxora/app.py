@@ -133,41 +133,34 @@ class Nuxora(App):
     BINDINGS = [
         ("q", "quit", "Quit"),
         ("r", "refresh", "Refresh"),
-        ("ctrl+p", "settings", "Settings")
+        ("ctrl+s", "settings", "Settings")
     ]
 
     collectors = [
-        ("system", "System"),
-        ("cpu", "CPU"),
-        ("memory", "Memory"),
-        ("gpu", "GPU"),
-        ("disk", "Disk"),
-        ("network", "Network"),
-        ("processes", "Processes"),
-        ("sensors", "Sensors"),
-        ("services", "Services"),
-        ("filesystem", "Filesystem"),
-        ("usb", "USB"),
-        ("pci", "PCI"),
-        ("battery", "Battery"),
-        ("audio", "Audio"),
-        ("bluetooth", "Bluetooth"),
-        ("wifi", "Wi-Fi"),
-        ("users", "Users"),
-        ("logs", "Logs"),
-        ("kernel", "Kernel"),
-        ("process_tree", "Process Tree"),
-        ("containers", "Containers"),
-        ("virtualization", "Virtualization"),
-        ("packages", "Packages"),
-        ("mounts", "Mounts"),
-        ("cron", "Cron / Timers"),
-        ("gpu_processes", "GPU Processes"),
-        ("ai", "AI Processes"),
-        ("ollama", "Ollama"),
-        ("cuda", "CUDA"),
-        ("pytorch", "PyTorch")
+        ("system", "System"), ("cpu", "CPU"), ("memory", "Memory"),
+        ("gpu", "GPU"), ("disk", "Disk"), ("network", "Network"),
+        ("processes", "Processes"), ("sensors", "Sensors"),
+        ("services", "Services"), ("filesystem", "Filesystem"),
+        ("usb", "USB"), ("pci", "PCI"), ("battery", "Battery"),
+        ("audio", "Audio"), ("bluetooth", "Bluetooth"), ("wifi", "Wi-Fi"),
+        ("users", "Users"), ("logs", "Logs"), ("kernel", "Kernel"),
+        ("process_tree", "Process Tree"), ("containers", "Containers"),
+        ("virtualization", "Virtualization"), ("packages", "Packages"),
+        ("mounts", "Mounts"), ("cron", "Cron / Timers"),
+        ("gpu_processes", "GPU Processes"), ("ai", "AI Processes"),
+        ("ollama", "Ollama"), ("cuda", "CUDA"), ("pytorch", "PyTorch")
     ]
+
+    fast = {"system", "cpu", "memory", "gpu", "network"}
+    medium = {
+        "disk", "processes", "sensors", "battery", "wifi",
+        "gpu_processes", "ai", "pytorch"
+    }
+    slow = {
+        "services", "filesystem", "usb", "pci", "audio", "bluetooth",
+        "users", "logs", "kernel", "process_tree", "containers",
+        "virtualization", "packages", "mounts", "cron", "ollama", "cuda"
+    }
 
     def __init__(self):
         super().__init__()
@@ -178,7 +171,6 @@ class Nuxora(App):
 
     def compose(self) -> ComposeResult:
         yield Header()
-
         with ScrollableContainer(id="dashboard"):
             for key, name in self.collectors:
                 yield Vertical(
@@ -186,18 +178,21 @@ class Nuxora(App):
                     Static(id=f"panel-{key}"),
                     classes="panel"
                 )
-
         yield Footer()
 
     def on_mount(self):
         for key, _ in self.collectors:
             self.set_panel_visible(
-                key,
-                self.collector_visibility.get(key, True)
+                key, self.collector_visibility.get(key, True)
             )
 
+        self._net = None
+        self._net_t = time.monotonic()
+
         self.update_all()
-        self.set_interval(1, self.update_all)
+        self.set_interval(1, self.update_fast)
+        self.set_interval(3, self.update_medium)
+        self.set_interval(10, self.update_slow)
 
     def action_refresh(self):
         self.update_all()
@@ -206,21 +201,18 @@ class Nuxora(App):
         self.push_screen(SettingsScreen(self))
 
     def load_visibility(self):
-        default = {key: True for key, _ in self.collectors}
-
+        result = {key: True for key, _ in self.collectors}
         try:
             with open(self.config_path) as f:
                 data = json.load(f)
-                if isinstance(data, dict):
-                    default.update(data)
+            if isinstance(data, dict):
+                result.update(data)
         except Exception:
             pass
-
-        return default
+        return result
 
     def save_visibility(self):
         os.makedirs(os.path.dirname(self.config_path), exist_ok=True)
-
         with open(self.config_path, "w") as f:
             json.dump(self.collector_visibility, f, indent=2)
 
@@ -228,170 +220,183 @@ class Nuxora(App):
         try:
             self.query_one(f"#panel-{key}").parent.display = value
         except Exception:
-            try:
-                self.query_one(f"#panel-{key}").display = value
-            except Exception:
-                pass
+            pass
 
-    def set(self, key, text):
+    def set(self, key, value):
         try:
-            self.query_one(f"#panel-{key}").update(text)
+            self.query_one(f"#panel-{key}").update(value)
         except Exception:
             pass
 
+    def enabled(self, key):
+        return self.collector_visibility.get(key, True)
+
     def update_all(self):
-        self.update_system()
-        self.update_cpu()
-        self.update_memory()
-        self.update_gpu()
-        self.update_disk()
-        self.update_network()
-        self.update_processes()
-        self.update_sensors()
-        self.update_services()
-        self.update_filesystem()
-        self.update_usb()
-        self.update_pci()
-        self.update_battery()
-        self.update_audio()
-        self.update_bluetooth()
-        self.update_wifi()
-        self.update_users()
-        self.update_logs()
-        self.update_kernel()
-        self.update_process_tree()
-        self.update_containers()
-        self.update_virtualization()
-        self.update_packages()
-        self.update_mounts()
-        self.update_cron()
-        self.update_gpu_processes()
-        self.update_ai()
-        self.update_ollama()
-        self.update_cuda()
-        self.update_pytorch()
+        self.update_fast()
+        self.update_medium()
+        self.update_slow()
+
+    def update_fast(self):
+        if self.enabled("system"):
+            self.update_system()
+        if self.enabled("cpu"):
+            self.update_cpu()
+        if self.enabled("memory"):
+            self.update_memory()
+        if self.enabled("gpu"):
+            self.update_gpu()
+        if self.enabled("network"):
+            self.update_network()
+
+    def update_medium(self):
+        if self.enabled("disk"):
+            self.update_disk()
+        if self.enabled("processes"):
+            self.update_processes()
+        if self.enabled("sensors"):
+            self.update_sensors()
+        if self.enabled("battery"):
+            self.update_battery()
+        if self.enabled("wifi"):
+            self.update_wifi()
+        if self.enabled("gpu_processes"):
+            self.update_gpu_processes()
+        if self.enabled("ai"):
+            self.update_ai()
+        if self.enabled("pytorch"):
+            self.update_pytorch()
+
+    def update_slow(self):
+        if self.enabled("services"):
+            self.update_services()
+        if self.enabled("filesystem"):
+            self.update_filesystem()
+        if self.enabled("usb"):
+            self.update_usb()
+        if self.enabled("pci"):
+            self.update_pci()
+        if self.enabled("audio"):
+            self.update_audio()
+        if self.enabled("bluetooth"):
+            self.update_bluetooth()
+        if self.enabled("users"):
+            self.update_users()
+        if self.enabled("logs"):
+            self.update_logs()
+        if self.enabled("kernel"):
+            self.update_kernel()
+        if self.enabled("process_tree"):
+            self.update_process_tree()
+        if self.enabled("containers"):
+            self.update_containers()
+        if self.enabled("virtualization"):
+            self.update_virtualization()
+        if self.enabled("packages"):
+            self.update_packages()
+        if self.enabled("mounts"):
+            self.update_mounts()
+        if self.enabled("cron"):
+            self.update_cron()
+        if self.enabled("ollama"):
+            self.update_ollama()
+        if self.enabled("cuda"):
+            self.update_cuda()
 
     def update_system(self):
         s = get_system()
         battery = ""
-
         if s.get("battery") is not None:
             battery = (
                 f"\nBattery   {s['battery']:.0f}%"
                 + (" Charging" if s.get("charging") else "")
             )
-
         self.set(
             "system",
-            f"OS        {s['os']}\n"
-            f"Kernel    {s['kernel']}\n"
-            f"Machine   {s['machine']}\n"
-            f"Host      {s['host']}\n"
-            f"Uptime    {s['uptime']}\n"
-            f"Time      {s['time']}\n"
-            f"Users     {s['users']}\n"
-            f"Boot      {s['boot']}{battery}"
+            f"OS        {s['os']}\nKernel    {s['kernel']}\n"
+            f"Machine   {s['machine']}\nHost      {s['host']}\n"
+            f"Uptime    {s['uptime']}\nTime      {s['time']}\n"
+            f"Users     {s['users']}\nBoot      {s['boot']}{battery}"
         )
 
     def update_cpu(self):
         c = get_cpu()
-        frequency = c["frequency"]
-
+        f = c["frequency"]
         lines = [
             f"Total     {c['total']:5.1f}%",
             f"Cores     {c['count']} ({c['physical']} physical)"
         ]
-
-        if frequency:
+        if f:
             lines += [
-                f"Clock     {frequency.current:5.0f} MHz",
-                f"Max       {frequency.max:5.0f} MHz"
+                f"Clock     {f.current:5.0f} MHz",
+                f"Max       {f.max:5.0f} MHz"
             ]
-
         lines += [
             "",
             *[
-                f"{i:02d} {self.bar(value, 20)} {value:5.1f}%"
-                for i, value in enumerate(c["cores"])
+                f"{i:02d} {self.bar(v, 20)} {v:5.1f}%"
+                for i, v in enumerate(c["cores"])
             ],
             "",
-            f"Load      {c['load'][0]:.2f} "
-            f"{c['load'][1]:.2f} {c['load'][2]:.2f}"
+            f"Load      {c['load'][0]:.2f} {c['load'][1]:.2f} {c['load'][2]:.2f}"
         ]
-
         self.set("cpu", "\n".join(lines))
 
     def update_memory(self):
         m = get_memory()
-        ram = m["ram"]
-        swap = m["swap"]
-
+        ram, swap = m["ram"], m["swap"]
         self.set(
             "memory",
             f"RAM       {self.bytes(ram.used)} / {self.bytes(ram.total)}\n"
-            f"Usage     {ram.percent:5.1f}%\n"
-            f"{self.bar(ram.percent)}\n\n"
+            f"Usage     {ram.percent:5.1f}%\n{self.bar(ram.percent)}\n\n"
             f"Available {self.bytes(ram.available)}\n"
             f"Cached    {self.bytes(getattr(ram, 'cached', 0))}\n"
             f"Buffers   {self.bytes(getattr(ram, 'buffers', 0))}\n"
             f"Shared    {self.bytes(getattr(ram, 'shared', 0))}\n\n"
             f"SWAP      {self.bytes(swap.used)} / {self.bytes(swap.total)}\n"
-            f"Usage     {swap.percent:5.1f}%\n"
-            f"{self.bar(swap.percent)}"
+            f"Usage     {swap.percent:5.1f}%\n{self.bar(swap.percent)}"
         )
 
     def update_gpu(self):
         gpus = get_gpu()
-
         if not gpus:
             self.set("gpu", "NVIDIA GPU unavailable.")
             return
 
         lines = []
-
         for i, gpu in enumerate(gpus):
             usage = (
                 gpu["vram_used"] / gpu["vram_total"] * 100
                 if gpu["vram_total"] else 0
             )
-
             lines += [
                 gpu["name"],
                 f"GPU       {gpu['gpu']:5.1f}%",
-                f"VRAM      {self.bytes(gpu['vram_used'])} / "
-                f"{self.bytes(gpu['vram_total'])}",
+                f"VRAM      {self.bytes(gpu['vram_used'])} / {self.bytes(gpu['vram_total'])}",
                 f"Usage     {usage:5.1f}%\n{self.bar(usage)}",
-                f"Temp      {gpu['temp']}°C",
-                f"Power     {gpu['power']:.1f} W",
-                f"Clock     {gpu['clock']} MHz",
-                f"Mem Clock {gpu['memclock']} MHz"
+                f"Temp      {gpu.get('temp', 0)}°C",
+                f"Power     {gpu.get('power', 0):.1f} W",
+                f"Clock     {gpu.get('clock', 0)} MHz",
+                f"Mem Clock {gpu.get('memclock', 0)} MHz"
             ]
-
-            if gpu["fan"] is not None:
+            if gpu.get("fan") is not None:
                 lines.append(f"Fan       {gpu['fan']}%")
-
             if i < len(gpus) - 1:
                 lines.append("")
-
         self.set("gpu", "\n".join(lines))
 
     def update_disk(self):
         lines = []
-
-        for disk in get_disks():
+        for d in get_disks():
             lines += [
-                disk["device"],
-                disk["mount"],
-                f"{self.bar(disk['percent'])} {disk['percent']:5.1f}%",
-                f"Used      {self.bytes(disk['used'])}",
-                f"Free      {self.bytes(disk['free'])}",
-                f"Total     {self.bytes(disk['total'])}",
-                f"Type      {disk['fstype']}",
-                ""
+                d["device"], d["mount"],
+                f"{self.bar(d['percent'])} {d['percent']:5.1f}%",
+                f"Used      {self.bytes(d['used'])}",
+                f"Free      {self.bytes(d['free'])}",
+                f"Total     {self.bytes(d['total'])}",
+                f"Type      {d['fstype']}", ""
             ]
 
         io = get_io()
-
         if io:
             lines += [
                 f"Read      {self.bytes(io.read_bytes)}",
@@ -399,377 +404,260 @@ class Nuxora(App):
             ]
 
         devices = get_devices()
-
         if devices:
-            lines += ["", "BLOCK DEVICES"]
-
-            for device in devices:
-                lines.append(
-                    f"{device.get('path', device.get('name', '?')):16} "
-                    f"{device.get('size', '?'):>9} "
-                    f"{device.get('type', '?'):6} "
-                    f"{device.get('model') or ''}"
-                )
+            lines.append("\nBLOCK DEVICES")
+            lines += [
+                f"{d.get('path', d.get('name', '?')):16} "
+                f"{d.get('size', '?'):>9} {d.get('type', '?'):6} "
+                f"{d.get('model') or ''}"
+                for d in devices
+            ]
 
         self.set("disk", "\n".join(lines))
 
     def update_network(self):
-        network = get_network()
-        total = network["total"]
+        n = get_network()
+        total = n["total"]
         now = time.monotonic()
 
-        if not hasattr(self, "_net"):
-            self._net = total
-            self._net_t = now
+        if self._net is None:
+            self._net, self._net_t = total, now
 
         dt = max(now - self._net_t, 0.001)
         rx = (total.bytes_recv - self._net.bytes_recv) / dt
         tx = (total.bytes_sent - self._net.bytes_sent) / dt
-
-        self._net = total
-        self._net_t = now
+        self._net, self._net_t = total, now
 
         lines = [
             f"Download   {self.bytes(rx)}/s",
-            f"Upload     {self.bytes(tx)}/s",
-            "",
+            f"Upload     {self.bytes(tx)}/s", "",
             f"Total RX   {self.bytes(total.bytes_recv)}",
-            f"Total TX   {self.bytes(total.bytes_sent)}",
-            "",
+            f"Total TX   {self.bytes(total.bytes_sent)}", "",
             f"Packets RX {total.packets_recv:,}",
             f"Packets TX {total.packets_sent:,}",
             f"Errors RX  {total.errin:,}",
-            f"Errors TX  {total.errout:,}",
-            ""
+            f"Errors TX  {total.errout:,}", ""
         ]
-
-        for name, interface in network["interfaces"].items():
-            lines.append(
-                f"{name[:12]:12} "
-                f"↓{self.bytes(interface.bytes_recv)} "
-                f"↑{self.bytes(interface.bytes_sent)}"
-            )
-
-        lines += ["", f"Connections {len(network['connections'])}"]
+        lines += [
+            f"{name[:12]:12} ↓{self.bytes(i.bytes_recv)} ↑{self.bytes(i.bytes_sent)}"
+            for name, i in n["interfaces"].items()
+        ]
+        lines += ["", f"Connections {len(n['connections'])}"]
         self.set("network", "\n".join(lines))
 
     def update_processes(self):
         processes = get_processes()[:25]
-
         lines = [
-            "PID       PROCESS                       CPU      RAM       "
-            "MEMORY       STATUS"
+            "PID       PROCESS                       CPU      RAM       MEMORY       STATUS"
         ]
-
         lines += [
-            f"{process['pid']:<9}"
-            f"{process['name'][:28]:<29}"
-            f"{process['cpu']:>5.1f}%   "
-            f"{process['ram']:>5.1f}%   "
-            f"{self.bytes(process['memory']):>10}   "
-            f"{process['status']}"
-            for process in processes
+            f"{p['pid']:<9}{p['name'][:28]:<29}{p['cpu']:>5.1f}%   "
+            f"{p['ram']:>5.1f}%   {self.bytes(p['memory']):>10}   {p['status']}"
+            for p in processes
         ]
-
         self.set("processes", "\n".join(lines))
 
     def update_sensors(self):
-        sensors = get_sensors()
-        lines = []
-
-        for chip, items in sensors["temperatures"].items():
+        s, lines = get_sensors(), []
+        for chip, items in s["temperatures"].items():
             lines.append(chip)
-
-            for sensor in items:
-                high = (
-                    f"  high {sensor['high']:.1f}°C"
-                    if sensor["high"] else ""
-                )
+            for x in items:
+                high = f"  high {x['high']:.1f}°C" if x["high"] else ""
                 lines.append(
-                    f"  {sensor['label'] or '?':20} "
-                    f"{sensor['current']:6.1f}°C{high}"
+                    f"  {x['label'] or '?':20} {x['current']:6.1f}°C{high}"
                 )
-
-        for _, items in sensors["fans"].items():
-            for fan in items:
+        for items in s["fans"].values():
+            for x in items:
                 lines.append(
-                    f"  FAN {fan['label'] or '?':16} "
-                    f"{fan['current']:6.0f} RPM"
+                    f"  FAN {x['label'] or '?':16} {x['current']:6.0f} RPM"
                 )
-
         self.set("sensors", "\n".join(lines) or "No sensors found.")
 
     def update_services(self):
-        services = get_services()
         lines = [
-            f"{service['name']:<40} "
-            f"{service['active']:<8} "
-            f"{service['sub']:<10} "
-            f"{service['description']}"
-            for service in services
+            f"{s['name']:<40} {s['active']:<8} "
+            f"{s['sub']:<10} {s['description']}"
+            for s in get_services()[:100]
         ]
-
         self.set("services", "\n".join(lines) or "No services found.")
 
     def update_filesystem(self):
         lines = [
-            f"{fs['mount']:<25} "
-            f"{fs['fstype']:<8} "
-            f"{self.bar(fs['percent'], 16)} "
-            f"{fs['percent']:5.1f}%  "
-            f"{self.bytes(fs['free'])} free"
-            for fs in get_filesystems()
+            f"{f['mount']:<25} {f['fstype']:<8} "
+            f"{self.bar(f['percent'], 16)} {f['percent']:5.1f}% "
+            f"{self.bytes(f['free'])} free"
+            for f in get_filesystems()
         ]
-
         self.set("filesystem", "\n".join(lines) or "No filesystems.")
 
     def update_usb(self):
         lines = [
-            f"{device['bus']}:{device['device']}  "
-            f"{device['id']}  {device['name']}"
-            for device in get_usb()
+            f"{d['bus']}:{d['device']}  {d['id']}  {d['name']}"
+            for d in get_usb()
         ]
-
         self.set("usb", "\n".join(lines) or "No USB devices.")
 
     def update_pci(self):
         lines = [
-            f"{device['slot']:<15} "
-            f"{device['class']:<25} "
-            f"{device['vendor']} {device['device']}"
-            for device in get_pci()
+            f"{d['slot']:<15} {d['class']:<25} "
+            f"{d['vendor']} {d['device']}"
+            for d in get_pci()
         ]
-
         self.set("pci", "\n".join(lines) or "No PCI devices.")
 
     def update_battery(self):
-        battery = get_battery()
-
-        if not battery:
+        b = get_battery()
+        if not b:
             self.set("battery", "No battery detected.")
             return
-
         self.set(
             "battery",
-            f"Charge    {battery['percent']:.1f}%\n"
-            f"{self.bar(battery['percent'])}\n"
-            f"Status    "
-            f"{'Charging / AC' if battery['plugged'] else 'Discharging'}\n"
-            f"Time      {self.seconds(battery['seconds_left'])}"
+            f"Charge    {b['percent']:.1f}%\n{self.bar(b['percent'])}\n"
+            f"Status    {'Charging / AC' if b['plugged'] else 'Discharging'}\n"
+            f"Time      {self.seconds(b['seconds_left'])}"
         )
 
     def update_audio(self):
-        self.set(
-            "audio",
-            "\n".join(get_audio()) or "No audio information."
-        )
+        self.set("audio", "\n".join(get_audio()) or "No audio information.")
 
     def update_bluetooth(self):
-        lines = [
-            f"{device['mac']:<18} {device['name']}"
-            for device in get_bluetooth()
-        ]
-
-        self.set(
-            "bluetooth",
-            "\n".join(lines) or "No Bluetooth devices."
-        )
+        lines = [f"{d['mac']:<18} {d['name']}" for d in get_bluetooth()]
+        self.set("bluetooth", "\n".join(lines) or "No Bluetooth devices.")
 
     def update_wifi(self):
         lines = []
-
-        for interface in get_wifi():
+        for i in get_wifi():
             lines.append(
-                f"{interface['name']:<12} "
-                f"{'CONNECTED' if interface['connected'] else 'DISCONNECTED'}"
+                f"{i['name']:<12} "
+                f"{'CONNECTED' if i['connected'] else 'DISCONNECTED'}"
             )
-
-            if interface.get("link"):
-                lines.append(f"  {interface['link']}")
-
+            if i.get("link"):
+                lines.append(f"  {i['link']}")
         self.set("wifi", "\n".join(lines) or "No Wi-Fi interfaces.")
 
     def update_users(self):
         lines = [
-            f"{user['name']:<20} "
-            f"{str(user['terminal']):<10} "
-            f"{str(user['host']):<20} "
-            f"PID {user['pid']}"
-            for user in get_users()
+            f"{u['name']:<20} {str(u['terminal']):<10} "
+            f"{str(u['host']):<20} PID {u['pid']}"
+            for u in get_users()
         ]
-
         self.set("users", "\n".join(lines) or "No logged-in users.")
 
     def update_logs(self):
         self.set("logs", "\n".join(get_logs(20)) or "No logs.")
 
     def update_kernel(self):
-        kernel = get_kernel()
-
+        k = get_kernel()
         self.set(
             "kernel",
-            f"Release       {kernel['release']}\n"
-            f"Version       {kernel['version']}\n"
-            f"Machine       {kernel['machine']}\n"
-            f"Command line  {kernel['cmdline']}\n\n"
-            f"Loaded modules: {len(kernel['modules'])}"
+            f"Release       {k['release']}\nVersion       {k['version']}\n"
+            f"Machine       {k['machine']}\nCommand line  {k['cmdline']}\n\n"
+            f"Loaded modules: {len(k['modules'])}"
         )
 
     def update_process_tree(self):
-        tree = get_process_tree()
-        lines = []
-
+        tree, lines = get_process_tree(), []
         for pid, children in tree.items():
-            if not children:
-                continue
-
-            names = ", ".join(
-                f"{child['name']}({child['pid']})"
-                for child in children[:8]
-            )
-            lines.append(f"{pid:<8} → {names}")
-
-        self.set(
-            "process_tree",
-            "\n".join(lines[:80]) or "No process tree."
-        )
+            if children:
+                names = ", ".join(
+                    f"{x['name']}({x['pid']})" for x in children[:8]
+                )
+                lines.append(f"{pid:<8} → {names}")
+        self.set("process_tree", "\n".join(lines[:80]) or "No process tree.")
 
     def update_containers(self):
         lines = [
-            f"{container['id'][:12]:12} "
-            f"{container['name']:<20} "
-            f"{container['status']:<25} "
-            f"{container['image']}"
-            for container in get_containers()
+            f"{c['id'][:12]:12} {c['name']:<20} "
+            f"{c['status']:<25} {c['image']}"
+            for c in get_containers()
         ]
-
-        self.set(
-            "containers",
-            "\n".join(lines) or "No containers."
-        )
+        self.set("containers", "\n".join(lines) or "No containers.")
 
     def update_virtualization(self):
-        virtualization = get_virtualization()
-
+        v = get_virtualization()
         self.set(
             "virtualization",
-            f"Virtualization  {virtualization['virtualization']}\n"
-            f"KVM             "
-            f"{'available' if virtualization['kvm'] else 'unavailable'}\n"
-            f"Hypervisor      "
-            f"{'present' if virtualization['hypervisor'] else 'not detected'}"
+            f"Virtualization  {v['virtualization']}\n"
+            f"KVM             {'available' if v['kvm'] else 'unavailable'}\n"
+            f"Hypervisor      {'present' if v['hypervisor'] else 'not detected'}"
         )
 
     def update_packages(self):
-        packages = get_packages()
-
+        p = get_packages()
         self.set(
             "packages",
-            f"Manager   {packages['manager'] or 'none'}\n"
-            f"Packages  {len(packages['packages']):,}\n\n"
-            + "\n".join(packages["packages"][:50])
+            f"Manager   {p['manager'] or 'none'}\n"
+            f"Packages  {len(p['packages']):,}\n\n"
+            + "\n".join(p["packages"][:50])
         )
 
     def update_mounts(self):
         lines = [
-            f"{mount['device']:<25} "
-            f"{mount['mount']:<30} "
-            f"{mount['fstype']:<10} "
-            f"{mount['options']}"
-            for mount in get_mounts()
+            f"{m['device']:<25} {m['mount']:<30} "
+            f"{m['fstype']:<10} {m['options']}"
+            for m in get_mounts()
         ]
-
         self.set("mounts", "\n".join(lines) or "No mounts.")
 
     def update_cron(self):
-        timers = get_timers()
-        crontab = get_crontab()
-
-        if not timers and not crontab:
+        timers, cron = get_timers(), get_crontab()
+        if not timers and not cron:
             self.set("cron", "No timers or crontab.")
             return
-
         self.set(
             "cron",
-            "SYSTEMD TIMERS\n"
-            + "\n".join(timers[:30])
-            + "\n\nCRONTAB\n"
-            + "\n".join(crontab)
+            "SYSTEMD TIMERS\n" + "\n".join(timers[:30]) +
+            "\n\nCRONTAB\n" + "\n".join(cron)
         )
 
     def update_gpu_processes(self):
         lines = [
-            f"{process['pid']:<8} "
-            f"{process['name']:<35} "
-            f"{process['vram']:>8} MiB"
-            for process in get_gpu_processes()
+            f"{p['pid']:<8} {p['name']:<35} {p['vram']:>8} MiB"
+            for p in get_gpu_processes()
         ]
-
-        self.set(
-            "gpu_processes",
-            "\n".join(lines) or "No GPU processes."
-        )
+        self.set("gpu_processes", "\n".join(lines) or "No GPU processes.")
 
     def update_ai(self):
         lines = [
-            f"{process['pid']:<8} "
-            f"{process['name']:<20} "
-            f"CPU {process['cpu']:5.1f}%  "
-            f"RAM {self.bytes(process['memory'])}"
-            for process in get_ai_processes()
+            f"{p['pid']:<8} {p['name']:<20} "
+            f"CPU {p['cpu']:5.1f}%  RAM {self.bytes(p['memory'])}"
+            for p in get_ai_processes()
         ]
-
-        self.set(
-            "ai",
-            "\n".join(lines) or "No AI processes detected."
-        )
+        self.set("ai", "\n".join(lines) or "No AI processes detected.")
 
     def update_ollama(self):
         lines = [
-            f"{model.get('name', '?'):<35} "
-            f"{model.get('size', '?')}  "
-            f"{model.get('expires_at', '')}"
-            for model in get_ollama()
+            f"{m.get('name', '?'):<35} {m.get('size', '?')} "
+            f"{m.get('expires_at', '')}"
+            for m in get_ollama()
         ]
-
-        self.set(
-            "ollama",
-            "\n".join(lines) or "Ollama is not running."
-        )
+        self.set("ollama", "\n".join(lines) or "Ollama is not running.")
 
     def update_cuda(self):
         cuda = get_cuda()
-
         if not cuda:
             self.set("cuda", "NVIDIA CUDA unavailable.")
             return
-
         self.set(
             "cuda",
             "\n".join(
-                f"{gpu['name']}\n"
-                f"Driver    {gpu['driver']}\n"
-                f"CUDA      {gpu['cuda']}"
-                for gpu in cuda
+                f"{g['name']}\nDriver    {g['driver']}\nCUDA      {g['cuda']}"
+                for g in cuda
             )
         )
 
     def update_pytorch(self):
-        pytorch = get_pytorch()
-
+        p = get_pytorch()
         lines = [
-            f"PyTorch   {pytorch['version'] or 'not installed'}",
-            f"CUDA      {pytorch['cuda'] or 'none'}",
-            f"Available {'YES' if pytorch['available'] else 'NO'}"
+            f"PyTorch   {p['version'] or 'not installed'}",
+            f"CUDA      {p['cuda'] or 'none'}",
+            f"Available {'YES' if p['available'] else 'NO'}"
         ]
-
-        for gpu in pytorch["gpus"]:
+        for g in p["gpus"]:
             lines += [
-                "",
-                f"GPU {gpu['index']}  {gpu['name']}",
-                f"VRAM      {self.bytes(gpu['memory'])}"
+                "", f"GPU {g['index']}  {g['name']}",
+                f"VRAM      {self.bytes(g['memory'])}"
             ]
-
         self.set("pytorch", "\n".join(lines))
 
     @staticmethod
@@ -781,19 +669,16 @@ class Nuxora(App):
     @staticmethod
     def bytes(value):
         value = float(value)
-
         for unit in ("B", "KB", "MB", "GB", "TB"):
             if abs(value) < 1024:
                 return f"{value:.1f} {unit}"
             value /= 1024
-
         return f"{value:.1f} PB"
 
     @staticmethod
     def seconds(value):
         if value is None or value < 0:
             return "Unknown"
-
         return time.strftime("%H:%M:%S", time.gmtime(value))
 
 
