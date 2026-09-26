@@ -1,7 +1,5 @@
 import json
 import os
-import shutil
-import subprocess
 import time
 
 from textual.app import App, ComposeResult
@@ -179,14 +177,15 @@ class Nuxora(App):
 
     .panel {
         width: 100%;
-        height: auto;
-        min-height: 9;
-        max-height: 14;
+        height: 16;
+        min-height: 16;
+        max-height: 16;
         border: solid $accent;
         padding: 0 1;
     }
 
     .panel.maximized {
+        width: 100%;
         height: 40;
         min-height: 40;
         max-height: 40;
@@ -196,19 +195,23 @@ class Nuxora(App):
         width: 1fr;
         height: 2;
         min-height: 2;
+        max-height: 2;
         text-style: bold;
         color: $accent;
     }
 
     .content {
         width: 1fr;
-        height: auto;
+        height: 8;
+        min-height: 8;
         max-height: 8;
         overflow: hidden;
     }
 
     .panel.maximized .content {
+        width: 1fr;
         height: 30;
+        min-height: 30;
         max-height: 30;
         overflow: auto;
     }
@@ -231,7 +234,7 @@ class Nuxora(App):
         ("q", "quit", "Quit"),
         ("r", "refresh_all", "Refresh"),
         ("ctrl+s", "settings", "Settings"),
-        ("ctrl+c", "copy_selection", "Copy"),
+        ("ctrl+c", "copy", "Copy"),
     ]
 
     collectors = [
@@ -429,44 +432,8 @@ class Nuxora(App):
             SettingsScreen(self)
         )
 
-    def action_copy_selection(self):
-        try:
-            selection = self.screen.get_selection()
-        except Exception:
-            selection = None
-
-        if not selection:
-            return
-
-        self.copy_to_clipboard(selection)
-
-    def copy_to_clipboard(self, text):
-        try:
-            import pyperclip
-
-            pyperclip.copy(text)
-            return
-        except Exception:
-            pass
-
-        commands = [
-            ["xclip", "-selection", "clipboard"],
-            ["xsel", "--clipboard", "--input"],
-        ]
-
-        for command in commands:
-            if shutil.which(command[0]):
-                try:
-                    subprocess.run(
-                        command,
-                        input=text,
-                        text=True,
-                        check=True,
-                        timeout=2,
-                    )
-                    return
-                except Exception:
-                    pass
+    def action_copy(self):
+        pass
 
     def on_button_pressed(self, event):
         button_id = event.button.id
