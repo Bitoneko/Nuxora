@@ -80,7 +80,10 @@ class SettingsScreen(ModalScreen):
 
     def compose(self):
         with Vertical(id="settings"):
-            yield Static("NUXORA DISPLAY SETTINGS", id="settings-title")
+            yield Static(
+                "NUXORA DISPLAY SETTINGS",
+                id="settings-title",
+            )
 
             with ScrollableContainer(id="checks"):
                 for key, name in self.main_app.collectors:
@@ -91,10 +94,23 @@ class SettingsScreen(ModalScreen):
                     )
 
             with Horizontal(id="buttons"):
-                yield Button("Show All", id="show-all")
-                yield Button("Hide All", id="hide-all")
-                yield Button("Apply", variant="primary", id="apply")
-                yield Button("Cancel", id="cancel")
+                yield Button(
+                    "Show All",
+                    id="show-all",
+                )
+                yield Button(
+                    "Hide All",
+                    id="hide-all",
+                )
+                yield Button(
+                    "Apply",
+                    variant="primary",
+                    id="apply",
+                )
+                yield Button(
+                    "Cancel",
+                    id="cancel",
+                )
 
     def on_button_pressed(self, event):
         button_id = event.button.id
@@ -129,7 +145,11 @@ class SettingsScreen(ModalScreen):
             ).value
 
             self.main_app.collector_visibility[key] = value
-            self.main_app.set_panel_visible(key, value)
+
+            self.main_app.set_panel_visible(
+                key,
+                value,
+            )
 
         self.main_app.save_visibility()
         self.main_app.refresh_all()
@@ -155,9 +175,6 @@ class Nuxora(App):
         height: auto;
         grid-size: 3;
         grid-columns: 1fr 1fr 1fr;
-        grid-rows: auto;
-        column-gap: 1;
-        row-gap: 1;
     }
 
     .panel {
@@ -180,8 +197,8 @@ class Nuxora(App):
     }
 
     Static {
-        height: auto;
         width: 1fr;
+        height: auto;
     }
     """
 
@@ -266,12 +283,21 @@ class Nuxora(App):
     def __init__(self):
         super().__init__()
 
-        base = os.path.expanduser("~/.config/nuxora")
+        base = os.path.expanduser(
+            "~/.config/nuxora"
+        )
 
-        self.visibility_path = f"{base}/visibility.json"
-        self.theme_path = f"{base}/theme.json"
+        self.visibility_path = (
+            f"{base}/visibility.json"
+        )
 
-        self.collector_visibility = self.load_visibility()
+        self.theme_path = (
+            f"{base}/theme.json"
+        )
+
+        self.collector_visibility = (
+            self.load_visibility()
+        )
 
         self.running = set()
 
@@ -580,7 +606,8 @@ class Nuxora(App):
 
         lines = [
             f"Total     {c['total']:5.1f}%",
-            f"Cores     {c['count']} ({c['physical']} physical)",
+            f"Cores     {c['count']} "
+            f"({c['physical']} physical)",
         ]
 
         if f:
@@ -592,11 +619,14 @@ class Nuxora(App):
         lines += [
             "",
             *[
-                f"{i:02d} {self.bar(v, 20)} {v:5.1f}%"
+                f"{i:02d} "
+                f"{self.bar(v, 20)} "
+                f"{v:5.1f}%"
                 for i, v in enumerate(c["cores"])
             ],
             "",
-            f"Load      {c['load'][0]:.2f} "
+            f"Load      "
+            f"{c['load'][0]:.2f} "
             f"{c['load'][1]:.2f} "
             f"{c['load'][2]:.2f}",
         ]
@@ -608,15 +638,21 @@ class Nuxora(App):
         r, s = m["ram"], m["swap"]
 
         return (
-            f"RAM       {self.bytes(r.used)} / "
+            f"RAM       "
+            f"{self.bytes(r.used)} / "
             f"{self.bytes(r.total)}\n"
             f"Usage     {r.percent:5.1f}%\n"
             f"{self.bar(r.percent)}\n\n"
-            f"Available {self.bytes(r.available)}\n"
-            f"Cached    {self.bytes(getattr(r, 'cached', 0))}\n"
-            f"Buffers   {self.bytes(getattr(r, 'buffers', 0))}\n"
-            f"Shared    {self.bytes(getattr(r, 'shared', 0))}\n\n"
-            f"SWAP      {self.bytes(s.used)} / "
+            f"Available "
+            f"{self.bytes(r.available)}\n"
+            f"Cached    "
+            f"{self.bytes(getattr(r, 'cached', 0))}\n"
+            f"Buffers   "
+            f"{self.bytes(getattr(r, 'buffers', 0))}\n"
+            f"Shared    "
+            f"{self.bytes(getattr(r, 'shared', 0))}\n\n"
+            f"SWAP      "
+            f"{self.bytes(s.used)} / "
             f"{self.bytes(s.total)}\n"
             f"Usage     {s.percent:5.1f}%\n"
             f"{self.bar(s.percent)}"
@@ -632,7 +668,9 @@ class Nuxora(App):
 
         for i, g in enumerate(gpus):
             u = (
-                g["vram_used"] / g["vram_total"] * 100
+                g["vram_used"]
+                / g["vram_total"]
+                * 100
                 if g["vram_total"]
                 else 0
             )
@@ -640,14 +678,19 @@ class Nuxora(App):
             lines += [
                 g["name"],
                 f"GPU       {g['gpu']:5.1f}%",
-                f"VRAM      {self.bytes(g['vram_used'])} / "
+                f"VRAM      "
+                f"{self.bytes(g['vram_used'])} / "
                 f"{self.bytes(g['vram_total'])}",
                 f"Usage     {u:5.1f}%\n"
                 f"{self.bar(u)}",
-                f"Temp      {g.get('temp', 0)}°C",
-                f"Power     {g.get('power', 0):.1f} W",
-                f"Clock     {g.get('clock', 0)} MHz",
-                f"Mem Clock {g.get('memclock', 0)} MHz",
+                f"Temp      "
+                f"{g.get('temp', 0)}°C",
+                f"Power     "
+                f"{g.get('power', 0):.1f} W",
+                f"Clock     "
+                f"{g.get('clock', 0)} MHz",
+                f"Mem Clock "
+                f"{g.get('memclock', 0)} MHz",
             ]
 
             if g.get("fan") is not None:
@@ -675,27 +718,37 @@ class Nuxora(App):
         )
 
         rx = (
-            total.bytes_recv - self.net.bytes_recv
+            total.bytes_recv
+            - self.net.bytes_recv
         ) / dt
 
         tx = (
-            total.bytes_sent - self.net.bytes_sent
+            total.bytes_sent
+            - self.net.bytes_sent
         ) / dt
 
         self.net = total
         self.net_time = now
 
         lines = [
-            f"Download   {self.bytes(rx)}/s",
-            f"Upload     {self.bytes(tx)}/s",
+            f"Download   "
+            f"{self.bytes(rx)}/s",
+            f"Upload     "
+            f"{self.bytes(tx)}/s",
             "",
-            f"Total RX   {self.bytes(total.bytes_recv)}",
-            f"Total TX   {self.bytes(total.bytes_sent)}",
+            f"Total RX   "
+            f"{self.bytes(total.bytes_recv)}",
+            f"Total TX   "
+            f"{self.bytes(total.bytes_sent)}",
             "",
-            f"Packets RX {total.packets_recv:,}",
-            f"Packets TX {total.packets_sent:,}",
-            f"Errors RX  {total.errin:,}",
-            f"Errors TX  {total.errout:,}",
+            f"Packets RX "
+            f"{total.packets_recv:,}",
+            f"Packets TX "
+            f"{total.packets_sent:,}",
+            f"Errors RX  "
+            f"{total.errin:,}",
+            f"Errors TX  "
+            f"{total.errout:,}",
             "",
         ]
 
@@ -710,7 +763,8 @@ class Nuxora(App):
             lines
             + [
                 "",
-                f"Connections {len(n['connections'])}",
+                f"Connections "
+                f"{len(n['connections'])}",
             ]
         )
 
@@ -723,10 +777,14 @@ class Nuxora(App):
                 d["mount"],
                 f"{self.bar(d['percent'])} "
                 f"{d['percent']:5.1f}%",
-                f"Used      {self.bytes(d['used'])}",
-                f"Free      {self.bytes(d['free'])}",
-                f"Total     {self.bytes(d['total'])}",
-                f"Type      {d['fstype']}",
+                f"Used      "
+                f"{self.bytes(d['used'])}",
+                f"Free      "
+                f"{self.bytes(d['free'])}",
+                f"Total     "
+                f"{self.bytes(d['total'])}",
+                f"Type      "
+                f"{d['fstype']}",
                 "",
             ]
 
@@ -734,14 +792,18 @@ class Nuxora(App):
 
         if io:
             lines += [
-                f"Read      {self.bytes(io.read_bytes)}",
-                f"Write     {self.bytes(io.write_bytes)}",
+                f"Read      "
+                f"{self.bytes(io.read_bytes)}",
+                f"Write     "
+                f"{self.bytes(io.write_bytes)}",
             ]
 
         devices = get_devices()
 
         if devices:
-            lines.append("\nBLOCK DEVICES")
+            lines.append(
+                "\nBLOCK DEVICES"
+            )
 
             lines += [
                 f"{d.get('path', d.get('name', '?')):16} "
@@ -781,24 +843,31 @@ class Nuxora(App):
 
             for x in items:
                 h = (
-                    f"  high {x['high']:.1f}°C"
+                    f"  high "
+                    f"{x['high']:.1f}°C"
                     if x["high"]
                     else ""
                 )
 
                 lines.append(
-                    f"  {x['label'] or '?':20} "
-                    f"{x['current']:6.1f}°C{h}"
+                    f"  "
+                    f"{x['label'] or '?':20} "
+                    f"{x['current']:6.1f}°C"
+                    f"{h}"
                 )
 
         for items in s["fans"].values():
             for x in items:
                 lines.append(
-                    f"  FAN {x['label'] or '?':16} "
+                    f"  FAN "
+                    f"{x['label'] or '?':16} "
                     f"{x['current']:6.0f} RPM"
                 )
 
-        return "\n".join(lines) or "No sensors found."
+        return (
+            "\n".join(lines)
+            or "No sensors found."
+        )
 
     def collect_services(self):
         return "\n".join(
@@ -831,7 +900,8 @@ class Nuxora(App):
         return "\n".join(
             f"{x['slot']:<15} "
             f"{x['class']:<25} "
-            f"{x['vendor']} {x['device']}"
+            f"{x['vendor']} "
+            f"{x['device']}"
             for x in get_pci()
         ) or "No PCI devices."
 
@@ -842,7 +912,8 @@ class Nuxora(App):
             return "No battery detected."
 
         return (
-            f"Charge    {b['percent']:.1f}%\n"
+            f"Charge    "
+            f"{b['percent']:.1f}%\n"
             f"{self.bar(b['percent'])}\n"
             f"Status    "
             f"{'Charging / AC' if b['plugged'] else 'Discharging'}\n"
@@ -858,7 +929,8 @@ class Nuxora(App):
 
     def collect_bluetooth(self):
         return "\n".join(
-            f"{x['mac']:<18} {x['name']}"
+            f"{x['mac']:<18} "
+            f"{x['name']}"
             for x in get_bluetooth()
         ) or "No Bluetooth devices."
 
@@ -876,7 +948,10 @@ class Nuxora(App):
                     f"  {x['link']}"
                 )
 
-        return "\n".join(lines) or "No Wi-Fi interfaces."
+        return (
+            "\n".join(lines)
+            or "No Wi-Fi interfaces."
+        )
 
     def collect_users(self):
         return "\n".join(
@@ -901,7 +976,8 @@ class Nuxora(App):
             f"Version       {k['version']}\n"
             f"Machine       {k['machine']}\n"
             f"Command line  {k['cmdline']}\n\n"
-            f"Loaded modules: {len(k['modules'])}"
+            f"Loaded modules: "
+            f"{len(k['modules'])}"
         )
 
     def collect_process_tree(self):
@@ -937,7 +1013,8 @@ class Nuxora(App):
         x = get_virtualization()
 
         return (
-            f"Virtualization  {x['virtualization']}\n"
+            f"Virtualization  "
+            f"{x['virtualization']}\n"
             f"KVM             "
             f"{'available' if x['kvm'] else 'unavailable'}\n"
             f"Hypervisor      "
@@ -948,9 +1025,13 @@ class Nuxora(App):
         x = get_packages()
 
         return (
-            f"Manager   {x['manager'] or 'none'}\n"
-            f"Packages  {len(x['packages']):,}\n\n"
-            + "\n".join(x["packages"][:50])
+            f"Manager   "
+            f"{x['manager'] or 'none'}\n"
+            f"Packages  "
+            f"{len(x['packages']):,}\n\n"
+            + "\n".join(
+                x["packages"][:50]
+            )
         )
 
     def collect_mounts(self):
@@ -963,7 +1044,10 @@ class Nuxora(App):
         ) or "No mounts."
 
     def collect_cron(self):
-        t, c = get_timers(), get_crontab()
+        t, c = (
+            get_timers(),
+            get_crontab(),
+        )
 
         if not t and not c:
             return "No timers or crontab."
@@ -1028,8 +1112,10 @@ class Nuxora(App):
         for g in x["gpus"]:
             lines += [
                 "",
-                f"GPU {g['index']}  {g['name']}",
-                f"VRAM      {self.bytes(g['memory'])}",
+                f"GPU {g['index']}  "
+                f"{g['name']}",
+                f"VRAM      "
+                f"{self.bytes(g['memory'])}",
             ]
 
         return "\n".join(lines)
