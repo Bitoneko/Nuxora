@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nuxora"
+version = "0.1.0"
+description = "Real-time Linux system monitor and diagnostics TUI"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+dependencies = [
+    "textual>=0.50",
+    "psutil>=5.9",
+    "nvidia-ml-py>=12.0"
+]
+
+[project.scripts]
+nuxora = "nuxora.app:Nuxora"
+
+[tool.setuptools.packages.find]
+include = ["nuxora*"]
