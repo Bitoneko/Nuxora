@@ -1,4 +1,7 @@
 from .app import Nuxora
 
-if __name__ == "__main__":
+def main():
     Nuxora().run()
+
+if __name__ == "__main__":
+    main()
