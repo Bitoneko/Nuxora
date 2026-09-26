@@ -3,7 +3,7 @@ import os
 import time
 
 from textual.app import App, ComposeResult
-from textual.containers import Grid, Horizontal, ScrollableContainer, Vertical
+from textual.containers import Horizontal, ScrollableContainer, Vertical
 from textual.screen import ModalScreen
 from textual.widgets import Button, Checkbox, Footer, Header, Static
 
@@ -170,22 +170,28 @@ class Nuxora(App):
         overflow: auto;
     }
 
-    #grid {
+    #panels {
         width: 100%;
         height: auto;
-        grid-size: 3;
-        grid-columns: 1fr 1fr 1fr;
     }
 
     .panel {
-        width: 1fr;
+        width: 100%;
         height: auto;
-        min-height: 6;
+        min-height: 7;
+        max-height: 13;
         border: solid $accent;
         padding: 0 1;
     }
 
+    .panel.maximized {
+        height: 1fr;
+        max-height: none;
+        min-height: 20;
+    }
+
     .title {
+        width: 1fr;
         height: 2;
         text-style: bold;
         color: $accent;
@@ -194,6 +200,20 @@ class Nuxora(App):
     .content {
         width: 1fr;
         height: auto;
+        max-height: 8;
+        overflow: hidden;
+    }
+
+    .panel.maximized .content {
+        height: 1fr;
+        max-height: none;
+        overflow: auto;
+    }
+
+    .panel-button {
+        width: 100%;
+        height: 3;
+        margin-top: 1;
     }
 
     Static {
@@ -341,7 +361,7 @@ class Nuxora(App):
         yield Header()
 
         with ScrollableContainer(id="dashboard"):
-            with Grid(id="grid"):
+            with Vertical(id="panels"):
                 for key, name in self.collectors:
                     yield Vertical(
                         Static(
@@ -352,6 +372,11 @@ class Nuxora(App):
                             "Waiting...",
                             id=f"panel-{key}",
                             classes="content",
+                        ),
+                        Button(
+                            "Maximize",
+                            id=f"maximize-{key}",
+                            classes="panel-button",
                         ),
                         classes="panel",
                         id=f"box-{key}",
@@ -384,6 +409,38 @@ class Nuxora(App):
             10,
             self.update_slow,
         )
+
+    def on_button_pressed(self, event):
+        button_id = event.button.id
+
+        if not button_id:
+            return
+
+        if button_id.startswith("maximize-"):
+            key = button_id.removeprefix("maximize-")
+            self.toggle_panel(key)
+
+    def toggle_panel(self, key):
+        try:
+            panel = self.query_one(
+                f"#box-{key}",
+                Vertical,
+            )
+
+            button = self.query_one(
+                f"#maximize-{key}",
+                Button,
+            )
+
+            if "maximized" in panel.classes:
+                panel.remove_class("maximized")
+                button.label = "Maximize"
+            else:
+                panel.add_class("maximized")
+                button.label = "Minimize"
+
+        except Exception:
+            pass
 
     def action_quit(self):
         self.save_theme()
