@@ -3,9 +3,10 @@ import os
 import time
 
 from textual.app import App, ComposeResult
+from textual.binding import Binding
 from textual.containers import Horizontal, ScrollableContainer, Vertical
 from textual.screen import ModalScreen
-from textual.widgets import Button, Checkbox, Header, Static
+from textual.widgets import Button, Checkbox, Footer, Header, Static
 
 from collectors.ai import get_ai_processes
 from collectors.audio import get_audio
@@ -159,6 +160,8 @@ class SettingsScreen(ModalScreen):
 class Nuxora(App):
     TITLE = "Nuxora"
 
+    inherit_bindings = False
+
     CSS = """
     Screen {
         background: $background;
@@ -224,16 +227,6 @@ class Nuxora(App):
         margin-top: 1;
     }
 
-    #footer {
-        width: 100%;
-        height: 1;
-        min-height: 1;
-        max-height: 1;
-        padding: 0 1;
-        background: $panel;
-        color: $foreground;
-    }
-
     Static {
         width: 1fr;
         height: auto;
@@ -241,9 +234,26 @@ class Nuxora(App):
     """
 
     BINDINGS = [
-        ("q", "quit", "Quit"),
-        ("r", "refresh_all", "Refresh"),
-        ("ctrl+s", "settings", "Settings"),
+        Binding(
+            "q",
+            "quit",
+            "Quit",
+        ),
+        Binding(
+            "r",
+            "refresh_all",
+            "Refresh",
+        ),
+        Binding(
+            "ctrl+s",
+            "settings",
+            "Settings",
+        ),
+        Binding(
+            "ctrl+c",
+            "copy",
+            "Copy",
+        ),
     ]
 
     collectors = [
@@ -400,10 +410,7 @@ class Nuxora(App):
                         id=f"box-{key}",
                     )
 
-        yield Static(
-            "q Quit    r Refresh    ^s Settings    ^c Copy",
-            id="footer",
-        )
+        yield Footer()
 
     def on_mount(self):
         self.load_theme()
@@ -444,17 +451,8 @@ class Nuxora(App):
             SettingsScreen(self)
         )
 
-    def on_key(self, event):
-        if event.key == "ctrl+c":
-            event.stop()
-
-            try:
-                self.screen.copy_selection()
-            except Exception:
-                try:
-                    self.copy_selection()
-                except Exception:
-                    pass
+    def action_copy(self):
+        self.screen.action_copy_text()
 
     def on_button_pressed(self, event):
         button_id = event.button.id
