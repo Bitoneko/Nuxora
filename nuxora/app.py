@@ -82,7 +82,7 @@ class SettingsScreen(ModalScreen):
             )
 
         self.main_app.save_visibility()
-        self.main_app.refresh()
+        self.main_app.refresh_all()
         self.dismiss()
 
 
@@ -108,7 +108,7 @@ class Nuxora(App):
 
     BINDINGS = [
         ("q", "quit", "Quit"),
-        ("r", "refresh", "Refresh"),
+        ("r", "refresh_all", "Refresh"),
         ("ctrl+s", "settings", "Settings"),
     ]
 
@@ -128,10 +128,12 @@ class Nuxora(App):
     ]
 
     fast = {"system", "cpu", "memory", "gpu", "network"}
+
     medium = {
         "disk", "processes", "sensors", "battery", "wifi",
         "gpu_processes", "ai", "pytorch",
     }
+
     slow = {
         "services", "filesystem", "usb", "pci", "audio", "bluetooth",
         "users", "logs", "kernel", "process_tree", "containers",
@@ -140,45 +142,64 @@ class Nuxora(App):
 
     def __init__(self):
         super().__init__()
+
         base = os.path.expanduser("~/.config/nuxora")
         self.visibility_path = f"{base}/visibility.json"
         self.theme_path = f"{base}/theme.json"
+
         self.collector_visibility = self.load_visibility()
         self.running = set()
         self.net = None
         self.net_time = time.monotonic()
 
         self.jobs = {
-            "system": self.collect_system, "cpu": self.collect_cpu,
-            "memory": self.collect_memory, "gpu": self.collect_gpu,
-            "network": self.collect_network, "disk": self.collect_disk,
+            "system": self.collect_system,
+            "cpu": self.collect_cpu,
+            "memory": self.collect_memory,
+            "gpu": self.collect_gpu,
+            "network": self.collect_network,
+            "disk": self.collect_disk,
             "processes": self.collect_processes,
             "sensors": self.collect_sensors,
-            "battery": self.collect_battery, "wifi": self.collect_wifi,
+            "battery": self.collect_battery,
+            "wifi": self.collect_wifi,
             "gpu_processes": self.collect_gpu_processes,
-            "ai": self.collect_ai, "pytorch": self.collect_pytorch,
+            "ai": self.collect_ai,
+            "pytorch": self.collect_pytorch,
             "services": self.collect_services,
-            "filesystem": self.collect_filesystem, "usb": self.collect_usb,
-            "pci": self.collect_pci, "audio": self.collect_audio,
-            "bluetooth": self.collect_bluetooth, "users": self.collect_users,
-            "logs": self.collect_logs, "kernel": self.collect_kernel,
+            "filesystem": self.collect_filesystem,
+            "usb": self.collect_usb,
+            "pci": self.collect_pci,
+            "audio": self.collect_audio,
+            "bluetooth": self.collect_bluetooth,
+            "users": self.collect_users,
+            "logs": self.collect_logs,
+            "kernel": self.collect_kernel,
             "process_tree": self.collect_process_tree,
             "containers": self.collect_containers,
             "virtualization": self.collect_virtualization,
-            "packages": self.collect_packages, "mounts": self.collect_mounts,
-            "cron": self.collect_cron, "ollama": self.collect_ollama,
+            "packages": self.collect_packages,
+            "mounts": self.collect_mounts,
+            "cron": self.collect_cron,
+            "ollama": self.collect_ollama,
             "cuda": self.collect_cuda,
         }
 
     def compose(self) -> ComposeResult:
         yield Header()
+
         with ScrollableContainer(id="dashboard"):
             for key, name in self.collectors:
                 yield Vertical(
                     Static(name.upper(), classes="title"),
-                    Static("Waiting...", id=f"panel-{key}", classes="content"),
+                    Static(
+                        "Waiting...",
+                        id=f"panel-{key}",
+                        classes="content",
+                    ),
                     classes="panel",
                 )
+
         yield Footer()
 
     def on_mount(self):
@@ -187,7 +208,8 @@ class Nuxora(App):
         for key, _ in self.collectors:
             self.set_panel_visible(key, self.enabled(key))
 
-        self.refresh()
+        self.refresh_all()
+
         self.set_interval(1, self.update_fast)
         self.set_interval(3, self.update_medium)
         self.set_interval(10, self.update_slow)
@@ -197,13 +219,13 @@ class Nuxora(App):
         self.save_visibility()
         self.exit()
 
-    def action_refresh(self):
-        self.refresh()
+    def action_refresh_all(self):
+        self.refresh_all()
 
     def action_settings(self):
         self.push_screen(SettingsScreen(self))
 
-    def refresh(self):
+    def refresh_all(self):
         self.update_fast()
         self.update_medium()
         self.update_slow()
@@ -227,6 +249,7 @@ class Nuxora(App):
             return
 
         self.running.add(key)
+
         self.run_worker(
             lambda: self.worker(key),
             thread=True,
@@ -236,7 +259,12 @@ class Nuxora(App):
     def worker(self, key):
         try:
             result = self.jobs[key]()
-            self.call_from_thread(self.finished, key, result, None)
+            self.call_from_thread(
+                self.finished,
+                key,
+                result,
+                None,
+            )
         except Exception as e:
             self.call_from_thread(
                 self.finished,
@@ -258,41 +286,73 @@ class Nuxora(App):
 
     def set_panel_visible(self, key, visible):
         try:
-            self.query_one(f"#panel-{key}").parent.display = visible
+            self.query_one(
+                f"#panel-{key}"
+            ).parent.display = visible
         except Exception:
             pass
 
     def set(self, key, value):
         try:
-            self.query_one(f"#panel-{key}", Static).update(str(value))
+            self.query_one(
+                f"#panel-{key}",
+                Static,
+            ).update(str(value))
         except Exception:
             pass
 
     def load_visibility(self):
-        result = {key: True for key, _ in self.collectors}
+        result = {
+            key: True
+            for key, _ in self.collectors
+        }
+
         try:
-            with open(self.visibility_path, encoding="utf-8") as f:
+            with open(
+                self.visibility_path,
+                encoding="utf-8",
+            ) as f:
                 data = json.load(f)
+
             if isinstance(data, dict):
                 result.update({
-                    k: bool(v) for k, v in data.items() if k in result
+                    k: bool(v)
+                    for k, v in data.items()
+                    if k in result
                 })
         except Exception:
             pass
+
         return result
 
     def save_visibility(self):
         try:
-            os.makedirs(os.path.dirname(self.visibility_path), exist_ok=True)
-            with open(self.visibility_path, "w", encoding="utf-8") as f:
-                json.dump(self.collector_visibility, f, indent=2)
+            os.makedirs(
+                os.path.dirname(self.visibility_path),
+                exist_ok=True,
+            )
+
+            with open(
+                self.visibility_path,
+                "w",
+                encoding="utf-8",
+            ) as f:
+                json.dump(
+                    self.collector_visibility,
+                    f,
+                    indent=2,
+                )
         except Exception:
             pass
 
     def load_theme(self):
         try:
-            with open(self.theme_path, encoding="utf-8") as f:
+            with open(
+                self.theme_path,
+                encoding="utf-8",
+            ) as f:
                 theme = json.load(f).get("theme")
+
             if theme in self.available_themes:
                 self.theme = theme
         except Exception:
@@ -300,8 +360,16 @@ class Nuxora(App):
 
     def save_theme(self):
         try:
-            os.makedirs(os.path.dirname(self.theme_path), exist_ok=True)
-            with open(self.theme_path, "w", encoding="utf-8") as f:
+            os.makedirs(
+                os.path.dirname(self.theme_path),
+                exist_ok=True,
+            )
+
+            with open(
+                self.theme_path,
+                "w",
+                encoding="utf-8",
+            ) as f:
                 json.dump({"theme": self.theme}, f)
         except Exception:
             pass
@@ -311,178 +379,288 @@ class Nuxora(App):
 
     def collect_system(self):
         s = get_system()
+
         b = (
             f"\nBattery   {s['battery']:.0f}%"
-            + (" Charging" if s.get("charging") else "")
-            if s.get("battery") is not None else ""
+            + (
+                " Charging"
+                if s.get("charging")
+                else ""
+            )
+            if s.get("battery") is not None
+            else ""
         )
+
         return (
-            f"OS        {s['os']}\nKernel    {s['kernel']}\n"
-            f"Machine   {s['machine']}\nHost      {s['host']}\n"
-            f"Uptime    {s['uptime']}\nTime      {s['time']}\n"
-            f"Users     {s['users']}\nBoot      {s['boot']}{b}"
+            f"OS        {s['os']}\n"
+            f"Kernel    {s['kernel']}\n"
+            f"Machine   {s['machine']}\n"
+            f"Host      {s['host']}\n"
+            f"Uptime    {s['uptime']}\n"
+            f"Time      {s['time']}\n"
+            f"Users     {s['users']}\n"
+            f"Boot      {s['boot']}{b}"
         )
 
     def collect_cpu(self):
         c = get_cpu()
         f = c["frequency"]
+
         lines = [
             f"Total     {c['total']:5.1f}%",
             f"Cores     {c['count']} ({c['physical']} physical)",
         ]
+
         if f:
-            lines += [f"Clock     {f.current:5.0f} MHz",
-                      f"Max       {f.max:5.0f} MHz"]
+            lines += [
+                f"Clock     {f.current:5.0f} MHz",
+                f"Max       {f.max:5.0f} MHz",
+            ]
+
         lines += [
             "",
-            *[f"{i:02d} {self.bar(v,20)} {v:5.1f}%"
-              for i, v in enumerate(c["cores"])],
+            *[
+                f"{i:02d} {self.bar(v, 20)} {v:5.1f}%"
+                for i, v in enumerate(c["cores"])
+            ],
             "",
-            f"Load      {c['load'][0]:.2f} {c['load'][1]:.2f} {c['load'][2]:.2f}",
+            f"Load      {c['load'][0]:.2f} "
+            f"{c['load'][1]:.2f} "
+            f"{c['load'][2]:.2f}",
         ]
+
         return "\n".join(lines)
 
     def collect_memory(self):
         m = get_memory()
         r, s = m["ram"], m["swap"]
+
         return (
-            f"RAM       {self.bytes(r.used)} / {self.bytes(r.total)}\n"
-            f"Usage     {r.percent:5.1f}%\n{self.bar(r.percent)}\n\n"
+            f"RAM       {self.bytes(r.used)} / "
+            f"{self.bytes(r.total)}\n"
+            f"Usage     {r.percent:5.1f}%\n"
+            f"{self.bar(r.percent)}\n\n"
             f"Available {self.bytes(r.available)}\n"
-            f"Cached    {self.bytes(getattr(r,'cached',0))}\n"
-            f"Buffers   {self.bytes(getattr(r,'buffers',0))}\n"
-            f"Shared    {self.bytes(getattr(r,'shared',0))}\n\n"
-            f"SWAP      {self.bytes(s.used)} / {self.bytes(s.total)}\n"
-            f"Usage     {s.percent:5.1f}%\n{self.bar(s.percent)}"
+            f"Cached    {self.bytes(getattr(r, 'cached', 0))}\n"
+            f"Buffers   {self.bytes(getattr(r, 'buffers', 0))}\n"
+            f"Shared    {self.bytes(getattr(r, 'shared', 0))}\n\n"
+            f"SWAP      {self.bytes(s.used)} / "
+            f"{self.bytes(s.total)}\n"
+            f"Usage     {s.percent:5.1f}%\n"
+            f"{self.bar(s.percent)}"
         )
 
     def collect_gpu(self):
         gpus = get_gpu()
+
         if not gpus:
             return "NVIDIA GPU unavailable."
+
         lines = []
+
         for i, g in enumerate(gpus):
-            u = g["vram_used"] / g["vram_total"] * 100 if g["vram_total"] else 0
+            u = (
+                g["vram_used"] / g["vram_total"] * 100
+                if g["vram_total"]
+                else 0
+            )
+
             lines += [
-                g["name"], f"GPU       {g['gpu']:5.1f}%",
-                f"VRAM      {self.bytes(g['vram_used'])} / {self.bytes(g['vram_total'])}",
+                g["name"],
+                f"GPU       {g['gpu']:5.1f}%",
+                f"VRAM      {self.bytes(g['vram_used'])} / "
+                f"{self.bytes(g['vram_total'])}",
                 f"Usage     {u:5.1f}%\n{self.bar(u)}",
-                f"Temp      {g.get('temp',0)}°C",
-                f"Power     {g.get('power',0):.1f} W",
-                f"Clock     {g.get('clock',0)} MHz",
-                f"Mem Clock {g.get('memclock',0)} MHz",
+                f"Temp      {g.get('temp', 0)}°C",
+                f"Power     {g.get('power', 0):.1f} W",
+                f"Clock     {g.get('clock', 0)} MHz",
+                f"Mem Clock {g.get('memclock', 0)} MHz",
             ]
+
             if g.get("fan") is not None:
                 lines.append(f"Fan       {g['fan']}%")
+
             if i < len(gpus) - 1:
                 lines.append("")
+
         return "\n".join(lines)
 
     def collect_network(self):
         n = get_network()
         total, now = n["total"], time.monotonic()
+
         if self.net is None:
             self.net, self.net_time = total, now
-        dt = max(now - self.net_time, .001)
-        rx = (total.bytes_recv - self.net.bytes_recv) / dt
-        tx = (total.bytes_sent - self.net.bytes_sent) / dt
+
+        dt = max(
+            now - self.net_time,
+            0.001,
+        )
+
+        rx = (
+            total.bytes_recv - self.net.bytes_recv
+        ) / dt
+
+        tx = (
+            total.bytes_sent - self.net.bytes_sent
+        ) / dt
+
         self.net, self.net_time = total, now
+
         lines = [
             f"Download   {self.bytes(rx)}/s",
-            f"Upload     {self.bytes(tx)}/s", "",
+            f"Upload     {self.bytes(tx)}/s",
+            "",
             f"Total RX   {self.bytes(total.bytes_recv)}",
-            f"Total TX   {self.bytes(total.bytes_sent)}", "",
+            f"Total TX   {self.bytes(total.bytes_sent)}",
+            "",
             f"Packets RX {total.packets_recv:,}",
             f"Packets TX {total.packets_sent:,}",
             f"Errors RX  {total.errin:,}",
-            f"Errors TX  {total.errout:,}", "",
+            f"Errors TX  {total.errout:,}",
+            "",
         ]
+
         lines += [
-            f"{name[:12]:12} ↓{self.bytes(i.bytes_recv)} ↑{self.bytes(i.bytes_sent)}"
+            f"{name[:12]:12} "
+            f"↓{self.bytes(i.bytes_recv)} "
+            f"↑{self.bytes(i.bytes_sent)}"
             for name, i in n["interfaces"].items()
         ]
-        return "\n".join(lines + ["", f"Connections {len(n['connections'])}"])
+
+        return "\n".join(
+            lines + [
+                "",
+                f"Connections {len(n['connections'])}",
+            ]
+        )
 
     def collect_disk(self):
         lines = []
+
         for d in get_disks():
             lines += [
-                d["device"], d["mount"],
-                f"{self.bar(d['percent'])} {d['percent']:5.1f}%",
+                d["device"],
+                d["mount"],
+                f"{self.bar(d['percent'])} "
+                f"{d['percent']:5.1f}%",
                 f"Used      {self.bytes(d['used'])}",
                 f"Free      {self.bytes(d['free'])}",
                 f"Total     {self.bytes(d['total'])}",
-                f"Type      {d['fstype']}", "",
+                f"Type      {d['fstype']}",
+                "",
             ]
+
         io = get_io()
+
         if io:
-            lines += [f"Read      {self.bytes(io.read_bytes)}",
-                      f"Write     {self.bytes(io.write_bytes)}"]
+            lines += [
+                f"Read      {self.bytes(io.read_bytes)}",
+                f"Write     {self.bytes(io.write_bytes)}",
+            ]
+
         devices = get_devices()
+
         if devices:
             lines.append("\nBLOCK DEVICES")
             lines += [
-                f"{d.get('path',d.get('name','?')):16} "
-                f"{d.get('size','?'):>9} {d.get('type','?'):6} "
-                f"{d.get('model') or ''}" for d in devices
+                f"{d.get('path', d.get('name', '?')):16} "
+                f"{d.get('size', '?'):>9} "
+                f"{d.get('type', '?'):6} "
+                f"{d.get('model') or ''}"
+                for d in devices
             ]
+
         return "\n".join(lines) or "No disks."
 
     def collect_processes(self):
         p = get_processes()[:25]
+
         return "\n".join([
             "PID       PROCESS                       CPU      RAM       MEMORY       STATUS",
             *[
-                f"{x['pid']:<9}{x['name'][:28]:<29}{x['cpu']:>5.1f}%   "
-                f"{x['ram']:>5.1f}%   {self.bytes(x['memory']):>10}   {x['status']}"
+                f"{x['pid']:<9}"
+                f"{x['name'][:28]:<29}"
+                f"{x['cpu']:>5.1f}%   "
+                f"{x['ram']:>5.1f}%   "
+                f"{self.bytes(x['memory']):>10}   "
+                f"{x['status']}"
                 for x in p
             ],
         ])
 
     def collect_sensors(self):
         s, lines = get_sensors(), []
+
         for chip, items in s["temperatures"].items():
             lines.append(chip)
+
             for x in items:
-                h = f"  high {x['high']:.1f}°C" if x["high"] else ""
-                lines.append(f"  {x['label'] or '?':20} {x['current']:6.1f}°C{h}")
+                h = (
+                    f"  high {x['high']:.1f}°C"
+                    if x["high"]
+                    else ""
+                )
+
+                lines.append(
+                    f"  {x['label'] or '?':20} "
+                    f"{x['current']:6.1f}°C{h}"
+                )
+
         for items in s["fans"].values():
             for x in items:
-                lines.append(f"  FAN {x['label'] or '?':16} {x['current']:6.0f} RPM")
+                lines.append(
+                    f"  FAN {x['label'] or '?':16} "
+                    f"{x['current']:6.0f} RPM"
+                )
+
         return "\n".join(lines) or "No sensors found."
 
     def collect_services(self):
         return "\n".join(
-            f"{x['name']:<40} {x['active']:<8} {x['sub']:<10} {x['description']}"
+            f"{x['name']:<40} "
+            f"{x['active']:<8} "
+            f"{x['sub']:<10} "
+            f"{x['description']}"
             for x in get_services()[:100]
         ) or "No services found."
 
     def collect_filesystem(self):
         return "\n".join(
-            f"{x['mount']:<25} {x['fstype']:<8} "
-            f"{self.bar(x['percent'],16)} {x['percent']:5.1f}% {self.bytes(x['free'])} free"
+            f"{x['mount']:<25} "
+            f"{x['fstype']:<8} "
+            f"{self.bar(x['percent'], 16)} "
+            f"{x['percent']:5.1f}% "
+            f"{self.bytes(x['free'])} free"
             for x in get_filesystems()
         ) or "No filesystems."
 
     def collect_usb(self):
         return "\n".join(
-            f"{x['bus']}:{x['device']}  {x['id']}  {x['name']}"
+            f"{x['bus']}:{x['device']}  "
+            f"{x['id']}  {x['name']}"
             for x in get_usb()
         ) or "No USB devices."
 
     def collect_pci(self):
         return "\n".join(
-            f"{x['slot']:<15} {x['class']:<25} {x['vendor']} {x['device']}"
+            f"{x['slot']:<15} "
+            f"{x['class']:<25} "
+            f"{x['vendor']} {x['device']}"
             for x in get_pci()
         ) or "No PCI devices."
 
     def collect_battery(self):
         b = get_battery()
+
         if not b:
             return "No battery detected."
+
         return (
-            f"Charge    {b['percent']:.1f}%\n{self.bar(b['percent'])}\n"
-            f"Status    {'Charging / AC' if b['plugged'] else 'Discharging'}\n"
+            f"Charge    {b['percent']:.1f}%\n"
+            f"{self.bar(b['percent'])}\n"
+            f"Status    "
+            f"{'Charging / AC' if b['plugged'] else 'Discharging'}\n"
             f"Time      {self.seconds(b['seconds_left'])}"
         )
 
@@ -491,21 +669,30 @@ class Nuxora(App):
 
     def collect_bluetooth(self):
         return "\n".join(
-            f"{x['mac']:<18} {x['name']}" for x in get_bluetooth()
+            f"{x['mac']:<18} {x['name']}"
+            for x in get_bluetooth()
         ) or "No Bluetooth devices."
 
     def collect_wifi(self):
         lines = []
+
         for x in get_wifi():
-            lines.append(f"{x['name']:<12} {'CONNECTED' if x['connected'] else 'DISCONNECTED'}")
+            lines.append(
+                f"{x['name']:<12} "
+                f"{'CONNECTED' if x['connected'] else 'DISCONNECTED'}"
+            )
+
             if x.get("link"):
                 lines.append(f"  {x['link']}")
+
         return "\n".join(lines) or "No Wi-Fi interfaces."
 
     def collect_users(self):
         return "\n".join(
-            f"{x['name']:<20} {str(x['terminal']):<10} "
-            f"{str(x['host']):<20} PID {x['pid']}"
+            f"{x['name']:<20} "
+            f"{str(x['terminal']):<10} "
+            f"{str(x['host']):<20} "
+            f"PID {x['pid']}"
             for x in get_users()
         ) or "No logged-in users."
 
@@ -514,37 +701,52 @@ class Nuxora(App):
 
     def collect_kernel(self):
         k = get_kernel()
+
         return (
-            f"Release       {k['release']}\nVersion       {k['version']}\n"
-            f"Machine       {k['machine']}\nCommand line  {k['cmdline']}\n\n"
+            f"Release       {k['release']}\n"
+            f"Version       {k['version']}\n"
+            f"Machine       {k['machine']}\n"
+            f"Command line  {k['cmdline']}\n\n"
             f"Loaded modules: {len(k['modules'])}"
         )
 
     def collect_process_tree(self):
         tree = get_process_tree()
         lines = []
+
         for pid, children in tree.items():
             if children:
-                names = ", ".join(f"{x['name']}({x['pid']})" for x in children[:8])
+                names = ", ".join(
+                    f"{x['name']}({x['pid']})"
+                    for x in children[:8]
+                )
                 lines.append(f"{pid:<8} → {names}")
+
         return "\n".join(lines[:80]) or "No process tree."
 
     def collect_containers(self):
         return "\n".join(
-            f"{x['id'][:12]:12} {x['name']:<20} {x['status']:<25} {x['image']}"
+            f"{x['id'][:12]:12} "
+            f"{x['name']:<20} "
+            f"{x['status']:<25} "
+            f"{x['image']}"
             for x in get_containers()
         ) or "No containers."
 
     def collect_virtualization(self):
         x = get_virtualization()
+
         return (
             f"Virtualization  {x['virtualization']}\n"
-            f"KVM             {'available' if x['kvm'] else 'unavailable'}\n"
-            f"Hypervisor      {'present' if x['hypervisor'] else 'not detected'}"
+            f"KVM             "
+            f"{'available' if x['kvm'] else 'unavailable'}\n"
+            f"Hypervisor      "
+            f"{'present' if x['hypervisor'] else 'not detected'}"
         )
 
     def collect_packages(self):
         x = get_packages()
+
         return (
             f"Manager   {x['manager'] or 'none'}\n"
             f"Packages  {len(x['packages']):,}\n\n"
@@ -553,53 +755,80 @@ class Nuxora(App):
 
     def collect_mounts(self):
         return "\n".join(
-            f"{x['device']:<25} {x['mount']:<30} {x['fstype']:<10} {x['options']}"
+            f"{x['device']:<25} "
+            f"{x['mount']:<30} "
+            f"{x['fstype']:<10} "
+            f"{x['options']}"
             for x in get_mounts()
         ) or "No mounts."
 
     def collect_cron(self):
         t, c = get_timers(), get_crontab()
+
         if not t and not c:
             return "No timers or crontab."
-        return "SYSTEMD TIMERS\n" + "\n".join(t[:30]) + "\n\nCRONTAB\n" + "\n".join(c)
+
+        return (
+            "SYSTEMD TIMERS\n"
+            + "\n".join(t[:30])
+            + "\n\nCRONTAB\n"
+            + "\n".join(c)
+        )
 
     def collect_gpu_processes(self):
         return "\n".join(
-            f"{x['pid']:<8} {x['name']:<35} {x['vram']:>8} MiB"
+            f"{x['pid']:<8} "
+            f"{x['name']:<35} "
+            f"{x['vram']:>8} MiB"
             for x in get_gpu_processes()
         ) or "No GPU processes."
 
     def collect_ai(self):
         return "\n".join(
-            f"{x['pid']:<8} {x['name']:<20} CPU {x['cpu']:5.1f}% RAM {self.bytes(x['memory'])}"
+            f"{x['pid']:<8} "
+            f"{x['name']:<20} "
+            f"CPU {x['cpu']:5.1f}% "
+            f"RAM {self.bytes(x['memory'])}"
             for x in get_ai_processes()
         ) or "No AI processes detected."
 
     def collect_ollama(self):
         return "\n".join(
-            f"{x.get('name','?'):<35} {x.get('size','?')} {x.get('expires_at','')}"
+            f"{x.get('name', '?'):<35} "
+            f"{x.get('size', '?')} "
+            f"{x.get('expires_at', '')}"
             for x in get_ollama()
         ) or "Ollama is not running."
 
     def collect_cuda(self):
         x = get_cuda()
+
         if not x:
             return "NVIDIA CUDA unavailable."
+
         return "\n".join(
-            f"{g['name']}\nDriver    {g['driver']}\nCUDA      {g['cuda']}"
+            f"{g['name']}\n"
+            f"Driver    {g['driver']}\n"
+            f"CUDA      {g['cuda']}"
             for g in x
         )
 
     def collect_pytorch(self):
         x = get_pytorch()
+
         lines = [
             f"PyTorch   {x['version'] or 'not installed'}",
             f"CUDA      {x['cuda'] or 'none'}",
             f"Available {'YES' if x['available'] else 'NO'}",
         ]
+
         for g in x["gpus"]:
-            lines += ["", f"GPU {g['index']}  {g['name']}",
-                      f"VRAM      {self.bytes(g['memory'])}"]
+            lines += [
+                "",
+                f"GPU {g['index']}  {g['name']}",
+                f"VRAM      {self.bytes(g['memory'])}",
+            ]
+
         return "\n".join(lines)
 
     @staticmethod
@@ -611,17 +840,23 @@ class Nuxora(App):
     @staticmethod
     def bytes(value):
         value = float(value)
+
         for unit in ("B", "KB", "MB", "GB", "TB"):
             if abs(value) < 1024:
                 return f"{value:.1f} {unit}"
             value /= 1024
+
         return f"{value:.1f} PB"
 
     @staticmethod
     def seconds(value):
         if value is None or value < 0:
             return "Unknown"
-        return time.strftime("%H:%M:%S", time.gmtime(value))
+
+        return time.strftime(
+            "%H:%M:%S",
+            time.gmtime(value),
+        )
 
 
 if __name__ == "__main__":
