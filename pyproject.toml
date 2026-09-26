@@ -16,7 +16,7 @@ dependencies = [
 ]
 
 [project.scripts]
-nuxora = "nuxora.app:Nuxora"
+nuxora = "nuxora.__main__:main"
 
 [tool.setuptools.packages.find]
 include = ["nuxora*"]
