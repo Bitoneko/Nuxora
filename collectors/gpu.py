@@ -22,31 +22,33 @@ def get_gpu():
                     h, n.NVML_TEMPERATURE_GPU
                 )
             except Exception:
-                temp = None
+                temp = 0
 
             try:
-                power = n.nvmlDeviceGetPowerUsage(h) / 1000
+                power = n.nvmlDeviceGetPowerUsage(h) / 1000.0
+                power_available = True
             except Exception:
-                power = None
+                power = 0.0
+                power_available = False
 
             try:
                 clock = n.nvmlDeviceGetClockInfo(
                     h, n.NVML_CLOCK_GRAPHICS
                 )
             except Exception:
-                clock = None
+                clock = 0
 
             try:
                 memclock = n.nvmlDeviceGetClockInfo(
                     h, n.NVML_CLOCK_MEM
                 )
             except Exception:
-                memclock = None
+                memclock = 0
 
             try:
                 fan = n.nvmlDeviceGetFanSpeed(h)
             except Exception:
-                fan = None
+                fan = 0
 
             result.append({
                 "name": name,
@@ -55,6 +57,7 @@ def get_gpu():
                 "vram_total": mem.total,
                 "temp": temp,
                 "power": power,
+                "power_available": power_available,
                 "clock": clock,
                 "memclock": memclock,
                 "fan": fan
