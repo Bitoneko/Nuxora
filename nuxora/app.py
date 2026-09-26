@@ -41,32 +41,13 @@ from collectors.wifi import get_wifi
 
 class SettingsScreen(ModalScreen):
     CSS = """
-    SettingsScreen {
-        align: center middle;
-        background: $background 80%;
-    }
-    #settings {
-        width: 60%;
-        height: 80%;
-        border: solid $accent;
-        background: $surface;
-        padding: 1 2;
-    }
-    #settings-title {
-        height: 3;
-        text-style: bold;
-    }
-    #checks {
-        height: 1fr;
-        overflow: auto;
-    }
-    #buttons {
-        height: 3;
-        align: right middle;
-    }
-    Button {
-        margin-left: 1;
-    }
+    SettingsScreen { align: center middle; background: $background 80%; }
+    #settings { width: 60%; height: 80%; border: solid $accent;
+        background: $surface; padding: 1 2; }
+    #settings-title { height: 3; text-style: bold; }
+    #checks { height: 1fr; overflow: auto; }
+    #buttons { height: 3; align: right middle; }
+    Button { margin-left: 1; }
     """
 
     def __init__(self, app):
@@ -80,8 +61,8 @@ class SettingsScreen(ModalScreen):
                 for key, name in self.main_app.collectors:
                     yield Checkbox(
                         name,
-                        value=self.main_app.collector_visibility.get(key, True),
-                        id=f"check-{key}"
+                        value=self.main_app.enabled(key),
+                        id=f"check-{key}",
                     )
             with Horizontal(id="buttons"):
                 yield Button("Apply", variant="primary", id="apply")
@@ -93,11 +74,15 @@ class SettingsScreen(ModalScreen):
             return
 
         for key, _ in self.main_app.collectors:
-            box = self.query_one(f"#check-{key}", Checkbox)
-            self.main_app.collector_visibility[key] = box.value
-            self.main_app.set_panel_visible(key, box.value)
+            self.main_app.collector_visibility[key] = (
+                self.query_one(f"#check-{key}", Checkbox).value
+            )
+            self.main_app.set_panel_visible(
+                key, self.main_app.enabled(key)
+            )
 
         self.main_app.save_visibility()
+        self.main_app.refresh()
         self.dismiss()
 
 
@@ -106,34 +91,25 @@ class Nuxora(App):
     SUB_TITLE = "Real-time Linux System Monitor"
 
     CSS = """
-    Screen {
-        background: $background;
-    }
-    #dashboard {
-        height: 1fr;
-        padding: 0 1;
-    }
+    Screen { background: $background; }
+    #dashboard { height: 1fr; padding: 0 1; }
     .panel {
         width: 1fr;
-        min-height: 12;
+        min-height: 10;
+        max-height: 24;
         border: solid $accent;
         padding: 0 1;
         margin: 0 1 1 0;
     }
-    .title {
-        height: 2;
-        text-style: bold;
-        color: $accent;
-    }
-    Static {
-        height: auto;
-    }
+    .title { height: 2; text-style: bold; color: $accent; }
+    .content { height: 1fr; overflow: hidden; }
+    Static { height: auto; }
     """
 
     BINDINGS = [
         ("q", "quit", "Quit"),
         ("r", "refresh", "Refresh"),
-        ("ctrl+s", "settings", "Settings")
+        ("ctrl+s", "settings", "Settings"),
     ]
 
     collectors = [
@@ -148,26 +124,51 @@ class Nuxora(App):
         ("virtualization", "Virtualization"), ("packages", "Packages"),
         ("mounts", "Mounts"), ("cron", "Cron / Timers"),
         ("gpu_processes", "GPU Processes"), ("ai", "AI Processes"),
-        ("ollama", "Ollama"), ("cuda", "CUDA"), ("pytorch", "PyTorch")
+        ("ollama", "Ollama"), ("cuda", "CUDA"), ("pytorch", "PyTorch"),
     ]
 
     fast = {"system", "cpu", "memory", "gpu", "network"}
     medium = {
         "disk", "processes", "sensors", "battery", "wifi",
-        "gpu_processes", "ai", "pytorch"
+        "gpu_processes", "ai", "pytorch",
     }
     slow = {
         "services", "filesystem", "usb", "pci", "audio", "bluetooth",
         "users", "logs", "kernel", "process_tree", "containers",
-        "virtualization", "packages", "mounts", "cron", "ollama", "cuda"
+        "virtualization", "packages", "mounts", "cron", "ollama", "cuda",
     }
 
     def __init__(self):
         super().__init__()
-        self.config_path = os.path.expanduser(
-            "~/.config/nuxora/visibility.json"
-        )
+        base = os.path.expanduser("~/.config/nuxora")
+        self.visibility_path = f"{base}/visibility.json"
+        self.theme_path = f"{base}/theme.json"
         self.collector_visibility = self.load_visibility()
+        self.running = set()
+        self.net = None
+        self.net_time = time.monotonic()
+
+        self.jobs = {
+            "system": self.collect_system, "cpu": self.collect_cpu,
+            "memory": self.collect_memory, "gpu": self.collect_gpu,
+            "network": self.collect_network, "disk": self.collect_disk,
+            "processes": self.collect_processes,
+            "sensors": self.collect_sensors,
+            "battery": self.collect_battery, "wifi": self.collect_wifi,
+            "gpu_processes": self.collect_gpu_processes,
+            "ai": self.collect_ai, "pytorch": self.collect_pytorch,
+            "services": self.collect_services,
+            "filesystem": self.collect_filesystem, "usb": self.collect_usb,
+            "pci": self.collect_pci, "audio": self.collect_audio,
+            "bluetooth": self.collect_bluetooth, "users": self.collect_users,
+            "logs": self.collect_logs, "kernel": self.collect_kernel,
+            "process_tree": self.collect_process_tree,
+            "containers": self.collect_containers,
+            "virtualization": self.collect_virtualization,
+            "packages": self.collect_packages, "mounts": self.collect_mounts,
+            "cron": self.collect_cron, "ollama": self.collect_ollama,
+            "cuda": self.collect_cuda,
+        }
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -175,259 +176,217 @@ class Nuxora(App):
             for key, name in self.collectors:
                 yield Vertical(
                     Static(name.upper(), classes="title"),
-                    Static(id=f"panel-{key}"),
-                    classes="panel"
+                    Static("Waiting...", id=f"panel-{key}", classes="content"),
+                    classes="panel",
                 )
         yield Footer()
 
     def on_mount(self):
+        self.load_theme()
+
         for key, _ in self.collectors:
-            self.set_panel_visible(
-                key, self.collector_visibility.get(key, True)
-            )
+            self.set_panel_visible(key, self.enabled(key))
 
-        self._net = None
-        self._net_t = time.monotonic()
-
-        self.update_all()
+        self.refresh()
         self.set_interval(1, self.update_fast)
         self.set_interval(3, self.update_medium)
         self.set_interval(10, self.update_slow)
 
+    def action_quit(self):
+        self.save_theme()
+        self.save_visibility()
+        self.exit()
+
     def action_refresh(self):
-        self.update_all()
+        self.refresh()
 
     def action_settings(self):
         self.push_screen(SettingsScreen(self))
 
-    def load_visibility(self):
-        result = {key: True for key, _ in self.collectors}
-        try:
-            with open(self.config_path) as f:
-                data = json.load(f)
-            if isinstance(data, dict):
-                result.update(data)
-        except Exception:
-            pass
-        return result
-
-    def save_visibility(self):
-        os.makedirs(os.path.dirname(self.config_path), exist_ok=True)
-        with open(self.config_path, "w") as f:
-            json.dump(self.collector_visibility, f, indent=2)
-
-    def set_panel_visible(self, key, value):
-        try:
-            self.query_one(f"#panel-{key}").parent.display = value
-        except Exception:
-            pass
-
-    def set(self, key, value):
-        try:
-            self.query_one(f"#panel-{key}").update(value)
-        except Exception:
-            pass
-
-    def enabled(self, key):
-        return self.collector_visibility.get(key, True)
-
-    def update_all(self):
+    def refresh(self):
         self.update_fast()
         self.update_medium()
         self.update_slow()
 
     def update_fast(self):
-        if self.enabled("system"):
-            self.update_system()
-        if self.enabled("cpu"):
-            self.update_cpu()
-        if self.enabled("memory"):
-            self.update_memory()
-        if self.enabled("gpu"):
-            self.update_gpu()
-        if self.enabled("network"):
-            self.update_network()
+        self.run_group(self.fast)
 
     def update_medium(self):
-        if self.enabled("disk"):
-            self.update_disk()
-        if self.enabled("processes"):
-            self.update_processes()
-        if self.enabled("sensors"):
-            self.update_sensors()
-        if self.enabled("battery"):
-            self.update_battery()
-        if self.enabled("wifi"):
-            self.update_wifi()
-        if self.enabled("gpu_processes"):
-            self.update_gpu_processes()
-        if self.enabled("ai"):
-            self.update_ai()
-        if self.enabled("pytorch"):
-            self.update_pytorch()
+        self.run_group(self.medium)
 
     def update_slow(self):
-        if self.enabled("services"):
-            self.update_services()
-        if self.enabled("filesystem"):
-            self.update_filesystem()
-        if self.enabled("usb"):
-            self.update_usb()
-        if self.enabled("pci"):
-            self.update_pci()
-        if self.enabled("audio"):
-            self.update_audio()
-        if self.enabled("bluetooth"):
-            self.update_bluetooth()
-        if self.enabled("users"):
-            self.update_users()
-        if self.enabled("logs"):
-            self.update_logs()
-        if self.enabled("kernel"):
-            self.update_kernel()
-        if self.enabled("process_tree"):
-            self.update_process_tree()
-        if self.enabled("containers"):
-            self.update_containers()
-        if self.enabled("virtualization"):
-            self.update_virtualization()
-        if self.enabled("packages"):
-            self.update_packages()
-        if self.enabled("mounts"):
-            self.update_mounts()
-        if self.enabled("cron"):
-            self.update_cron()
-        if self.enabled("ollama"):
-            self.update_ollama()
-        if self.enabled("cuda"):
-            self.update_cuda()
+        self.run_group(self.slow)
 
-    def update_system(self):
-        s = get_system()
-        battery = ""
-        if s.get("battery") is not None:
-            battery = (
-                f"\nBattery   {s['battery']:.0f}%"
-                + (" Charging" if s.get("charging") else "")
+    def run_group(self, group):
+        for key in group:
+            if self.enabled(key):
+                self.run_collector(key)
+
+    def run_collector(self, key):
+        if key in self.running:
+            return
+
+        self.running.add(key)
+        self.run_worker(
+            lambda: self.worker(key),
+            thread=True,
+            exclusive=False,
+        )
+
+    def worker(self, key):
+        try:
+            result = self.jobs[key]()
+            self.call_from_thread(self.finished, key, result, None)
+        except Exception as e:
+            self.call_from_thread(
+                self.finished,
+                key,
+                None,
+                f"{type(e).__name__}: {e}",
             )
-        self.set(
-            "system",
+
+    def finished(self, key, result, error):
+        self.running.discard(key)
+
+        if error:
+            self.set(key, f"Collector error: {error}")
+        elif result is not None:
+            self.set(key, result)
+
+    def enabled(self, key):
+        return self.collector_visibility.get(key, True)
+
+    def set_panel_visible(self, key, visible):
+        try:
+            self.query_one(f"#panel-{key}").parent.display = visible
+        except Exception:
+            pass
+
+    def set(self, key, value):
+        try:
+            self.query_one(f"#panel-{key}", Static).update(str(value))
+        except Exception:
+            pass
+
+    def load_visibility(self):
+        result = {key: True for key, _ in self.collectors}
+        try:
+            with open(self.visibility_path, encoding="utf-8") as f:
+                data = json.load(f)
+            if isinstance(data, dict):
+                result.update({
+                    k: bool(v) for k, v in data.items() if k in result
+                })
+        except Exception:
+            pass
+        return result
+
+    def save_visibility(self):
+        try:
+            os.makedirs(os.path.dirname(self.visibility_path), exist_ok=True)
+            with open(self.visibility_path, "w", encoding="utf-8") as f:
+                json.dump(self.collector_visibility, f, indent=2)
+        except Exception:
+            pass
+
+    def load_theme(self):
+        try:
+            with open(self.theme_path, encoding="utf-8") as f:
+                theme = json.load(f).get("theme")
+            if theme in self.available_themes:
+                self.theme = theme
+        except Exception:
+            pass
+
+    def save_theme(self):
+        try:
+            os.makedirs(os.path.dirname(self.theme_path), exist_ok=True)
+            with open(self.theme_path, "w", encoding="utf-8") as f:
+                json.dump({"theme": self.theme}, f)
+        except Exception:
+            pass
+
+    def watch_theme(self, theme):
+        self.save_theme()
+
+    def collect_system(self):
+        s = get_system()
+        b = (
+            f"\nBattery   {s['battery']:.0f}%"
+            + (" Charging" if s.get("charging") else "")
+            if s.get("battery") is not None else ""
+        )
+        return (
             f"OS        {s['os']}\nKernel    {s['kernel']}\n"
             f"Machine   {s['machine']}\nHost      {s['host']}\n"
             f"Uptime    {s['uptime']}\nTime      {s['time']}\n"
-            f"Users     {s['users']}\nBoot      {s['boot']}{battery}"
+            f"Users     {s['users']}\nBoot      {s['boot']}{b}"
         )
 
-    def update_cpu(self):
+    def collect_cpu(self):
         c = get_cpu()
         f = c["frequency"]
         lines = [
             f"Total     {c['total']:5.1f}%",
-            f"Cores     {c['count']} ({c['physical']} physical)"
+            f"Cores     {c['count']} ({c['physical']} physical)",
         ]
         if f:
-            lines += [
-                f"Clock     {f.current:5.0f} MHz",
-                f"Max       {f.max:5.0f} MHz"
-            ]
+            lines += [f"Clock     {f.current:5.0f} MHz",
+                      f"Max       {f.max:5.0f} MHz"]
         lines += [
             "",
-            *[
-                f"{i:02d} {self.bar(v, 20)} {v:5.1f}%"
-                for i, v in enumerate(c["cores"])
-            ],
+            *[f"{i:02d} {self.bar(v,20)} {v:5.1f}%"
+              for i, v in enumerate(c["cores"])],
             "",
-            f"Load      {c['load'][0]:.2f} {c['load'][1]:.2f} {c['load'][2]:.2f}"
+            f"Load      {c['load'][0]:.2f} {c['load'][1]:.2f} {c['load'][2]:.2f}",
         ]
-        self.set("cpu", "\n".join(lines))
+        return "\n".join(lines)
 
-    def update_memory(self):
+    def collect_memory(self):
         m = get_memory()
-        ram, swap = m["ram"], m["swap"]
-        self.set(
-            "memory",
-            f"RAM       {self.bytes(ram.used)} / {self.bytes(ram.total)}\n"
-            f"Usage     {ram.percent:5.1f}%\n{self.bar(ram.percent)}\n\n"
-            f"Available {self.bytes(ram.available)}\n"
-            f"Cached    {self.bytes(getattr(ram, 'cached', 0))}\n"
-            f"Buffers   {self.bytes(getattr(ram, 'buffers', 0))}\n"
-            f"Shared    {self.bytes(getattr(ram, 'shared', 0))}\n\n"
-            f"SWAP      {self.bytes(swap.used)} / {self.bytes(swap.total)}\n"
-            f"Usage     {swap.percent:5.1f}%\n{self.bar(swap.percent)}"
+        r, s = m["ram"], m["swap"]
+        return (
+            f"RAM       {self.bytes(r.used)} / {self.bytes(r.total)}\n"
+            f"Usage     {r.percent:5.1f}%\n{self.bar(r.percent)}\n\n"
+            f"Available {self.bytes(r.available)}\n"
+            f"Cached    {self.bytes(getattr(r,'cached',0))}\n"
+            f"Buffers   {self.bytes(getattr(r,'buffers',0))}\n"
+            f"Shared    {self.bytes(getattr(r,'shared',0))}\n\n"
+            f"SWAP      {self.bytes(s.used)} / {self.bytes(s.total)}\n"
+            f"Usage     {s.percent:5.1f}%\n{self.bar(s.percent)}"
         )
 
-    def update_gpu(self):
+    def collect_gpu(self):
         gpus = get_gpu()
         if not gpus:
-            self.set("gpu", "NVIDIA GPU unavailable.")
-            return
-
+            return "NVIDIA GPU unavailable."
         lines = []
-        for i, gpu in enumerate(gpus):
-            usage = (
-                gpu["vram_used"] / gpu["vram_total"] * 100
-                if gpu["vram_total"] else 0
-            )
+        for i, g in enumerate(gpus):
+            u = g["vram_used"] / g["vram_total"] * 100 if g["vram_total"] else 0
             lines += [
-                gpu["name"],
-                f"GPU       {gpu['gpu']:5.1f}%",
-                f"VRAM      {self.bytes(gpu['vram_used'])} / {self.bytes(gpu['vram_total'])}",
-                f"Usage     {usage:5.1f}%\n{self.bar(usage)}",
-                f"Temp      {gpu.get('temp', 0)}°C",
-                f"Power     {gpu.get('power', 0):.1f} W",
-                f"Clock     {gpu.get('clock', 0)} MHz",
-                f"Mem Clock {gpu.get('memclock', 0)} MHz"
+                g["name"], f"GPU       {g['gpu']:5.1f}%",
+                f"VRAM      {self.bytes(g['vram_used'])} / {self.bytes(g['vram_total'])}",
+                f"Usage     {u:5.1f}%\n{self.bar(u)}",
+                f"Temp      {g.get('temp',0)}°C",
+                f"Power     {g.get('power',0):.1f} W",
+                f"Clock     {g.get('clock',0)} MHz",
+                f"Mem Clock {g.get('memclock',0)} MHz",
             ]
-            if gpu.get("fan") is not None:
-                lines.append(f"Fan       {gpu['fan']}%")
+            if g.get("fan") is not None:
+                lines.append(f"Fan       {g['fan']}%")
             if i < len(gpus) - 1:
                 lines.append("")
-        self.set("gpu", "\n".join(lines))
+        return "\n".join(lines)
 
-    def update_disk(self):
-        lines = []
-        for d in get_disks():
-            lines += [
-                d["device"], d["mount"],
-                f"{self.bar(d['percent'])} {d['percent']:5.1f}%",
-                f"Used      {self.bytes(d['used'])}",
-                f"Free      {self.bytes(d['free'])}",
-                f"Total     {self.bytes(d['total'])}",
-                f"Type      {d['fstype']}", ""
-            ]
-
-        io = get_io()
-        if io:
-            lines += [
-                f"Read      {self.bytes(io.read_bytes)}",
-                f"Write     {self.bytes(io.write_bytes)}"
-            ]
-
-        devices = get_devices()
-        if devices:
-            lines.append("\nBLOCK DEVICES")
-            lines += [
-                f"{d.get('path', d.get('name', '?')):16} "
-                f"{d.get('size', '?'):>9} {d.get('type', '?'):6} "
-                f"{d.get('model') or ''}"
-                for d in devices
-            ]
-
-        self.set("disk", "\n".join(lines))
-
-    def update_network(self):
+    def collect_network(self):
         n = get_network()
-        total = n["total"]
-        now = time.monotonic()
-
-        if self._net is None:
-            self._net, self._net_t = total, now
-
-        dt = max(now - self._net_t, 0.001)
-        rx = (total.bytes_recv - self._net.bytes_recv) / dt
-        tx = (total.bytes_sent - self._net.bytes_sent) / dt
-        self._net, self._net_t = total, now
-
+        total, now = n["total"], time.monotonic()
+        if self.net is None:
+            self.net, self.net_time = total, now
+        dt = max(now - self.net_time, .001)
+        rx = (total.bytes_recv - self.net.bytes_recv) / dt
+        tx = (total.bytes_sent - self.net.bytes_sent) / dt
+        self.net, self.net_time = total, now
         lines = [
             f"Download   {self.bytes(rx)}/s",
             f"Upload     {self.bytes(tx)}/s", "",
@@ -436,235 +395,218 @@ class Nuxora(App):
             f"Packets RX {total.packets_recv:,}",
             f"Packets TX {total.packets_sent:,}",
             f"Errors RX  {total.errin:,}",
-            f"Errors TX  {total.errout:,}", ""
+            f"Errors TX  {total.errout:,}", "",
         ]
         lines += [
             f"{name[:12]:12} ↓{self.bytes(i.bytes_recv)} ↑{self.bytes(i.bytes_sent)}"
             for name, i in n["interfaces"].items()
         ]
-        lines += ["", f"Connections {len(n['connections'])}"]
-        self.set("network", "\n".join(lines))
+        return "\n".join(lines + ["", f"Connections {len(n['connections'])}"])
 
-    def update_processes(self):
-        processes = get_processes()[:25]
-        lines = [
-            "PID       PROCESS                       CPU      RAM       MEMORY       STATUS"
-        ]
-        lines += [
-            f"{p['pid']:<9}{p['name'][:28]:<29}{p['cpu']:>5.1f}%   "
-            f"{p['ram']:>5.1f}%   {self.bytes(p['memory']):>10}   {p['status']}"
-            for p in processes
-        ]
-        self.set("processes", "\n".join(lines))
+    def collect_disk(self):
+        lines = []
+        for d in get_disks():
+            lines += [
+                d["device"], d["mount"],
+                f"{self.bar(d['percent'])} {d['percent']:5.1f}%",
+                f"Used      {self.bytes(d['used'])}",
+                f"Free      {self.bytes(d['free'])}",
+                f"Total     {self.bytes(d['total'])}",
+                f"Type      {d['fstype']}", "",
+            ]
+        io = get_io()
+        if io:
+            lines += [f"Read      {self.bytes(io.read_bytes)}",
+                      f"Write     {self.bytes(io.write_bytes)}"]
+        devices = get_devices()
+        if devices:
+            lines.append("\nBLOCK DEVICES")
+            lines += [
+                f"{d.get('path',d.get('name','?')):16} "
+                f"{d.get('size','?'):>9} {d.get('type','?'):6} "
+                f"{d.get('model') or ''}" for d in devices
+            ]
+        return "\n".join(lines) or "No disks."
 
-    def update_sensors(self):
+    def collect_processes(self):
+        p = get_processes()[:25]
+        return "\n".join([
+            "PID       PROCESS                       CPU      RAM       MEMORY       STATUS",
+            *[
+                f"{x['pid']:<9}{x['name'][:28]:<29}{x['cpu']:>5.1f}%   "
+                f"{x['ram']:>5.1f}%   {self.bytes(x['memory']):>10}   {x['status']}"
+                for x in p
+            ],
+        ])
+
+    def collect_sensors(self):
         s, lines = get_sensors(), []
         for chip, items in s["temperatures"].items():
             lines.append(chip)
             for x in items:
-                high = f"  high {x['high']:.1f}°C" if x["high"] else ""
-                lines.append(
-                    f"  {x['label'] or '?':20} {x['current']:6.1f}°C{high}"
-                )
+                h = f"  high {x['high']:.1f}°C" if x["high"] else ""
+                lines.append(f"  {x['label'] or '?':20} {x['current']:6.1f}°C{h}")
         for items in s["fans"].values():
             for x in items:
-                lines.append(
-                    f"  FAN {x['label'] or '?':16} {x['current']:6.0f} RPM"
-                )
-        self.set("sensors", "\n".join(lines) or "No sensors found.")
+                lines.append(f"  FAN {x['label'] or '?':16} {x['current']:6.0f} RPM")
+        return "\n".join(lines) or "No sensors found."
 
-    def update_services(self):
-        lines = [
-            f"{s['name']:<40} {s['active']:<8} "
-            f"{s['sub']:<10} {s['description']}"
-            for s in get_services()[:100]
-        ]
-        self.set("services", "\n".join(lines) or "No services found.")
+    def collect_services(self):
+        return "\n".join(
+            f"{x['name']:<40} {x['active']:<8} {x['sub']:<10} {x['description']}"
+            for x in get_services()[:100]
+        ) or "No services found."
 
-    def update_filesystem(self):
-        lines = [
-            f"{f['mount']:<25} {f['fstype']:<8} "
-            f"{self.bar(f['percent'], 16)} {f['percent']:5.1f}% "
-            f"{self.bytes(f['free'])} free"
-            for f in get_filesystems()
-        ]
-        self.set("filesystem", "\n".join(lines) or "No filesystems.")
+    def collect_filesystem(self):
+        return "\n".join(
+            f"{x['mount']:<25} {x['fstype']:<8} "
+            f"{self.bar(x['percent'],16)} {x['percent']:5.1f}% {self.bytes(x['free'])} free"
+            for x in get_filesystems()
+        ) or "No filesystems."
 
-    def update_usb(self):
-        lines = [
-            f"{d['bus']}:{d['device']}  {d['id']}  {d['name']}"
-            for d in get_usb()
-        ]
-        self.set("usb", "\n".join(lines) or "No USB devices.")
+    def collect_usb(self):
+        return "\n".join(
+            f"{x['bus']}:{x['device']}  {x['id']}  {x['name']}"
+            for x in get_usb()
+        ) or "No USB devices."
 
-    def update_pci(self):
-        lines = [
-            f"{d['slot']:<15} {d['class']:<25} "
-            f"{d['vendor']} {d['device']}"
-            for d in get_pci()
-        ]
-        self.set("pci", "\n".join(lines) or "No PCI devices.")
+    def collect_pci(self):
+        return "\n".join(
+            f"{x['slot']:<15} {x['class']:<25} {x['vendor']} {x['device']}"
+            for x in get_pci()
+        ) or "No PCI devices."
 
-    def update_battery(self):
+    def collect_battery(self):
         b = get_battery()
         if not b:
-            self.set("battery", "No battery detected.")
-            return
-        self.set(
-            "battery",
+            return "No battery detected."
+        return (
             f"Charge    {b['percent']:.1f}%\n{self.bar(b['percent'])}\n"
             f"Status    {'Charging / AC' if b['plugged'] else 'Discharging'}\n"
             f"Time      {self.seconds(b['seconds_left'])}"
         )
 
-    def update_audio(self):
-        self.set("audio", "\n".join(get_audio()) or "No audio information.")
+    def collect_audio(self):
+        return "\n".join(get_audio()) or "No audio information."
 
-    def update_bluetooth(self):
-        lines = [f"{d['mac']:<18} {d['name']}" for d in get_bluetooth()]
-        self.set("bluetooth", "\n".join(lines) or "No Bluetooth devices.")
+    def collect_bluetooth(self):
+        return "\n".join(
+            f"{x['mac']:<18} {x['name']}" for x in get_bluetooth()
+        ) or "No Bluetooth devices."
 
-    def update_wifi(self):
+    def collect_wifi(self):
         lines = []
-        for i in get_wifi():
-            lines.append(
-                f"{i['name']:<12} "
-                f"{'CONNECTED' if i['connected'] else 'DISCONNECTED'}"
-            )
-            if i.get("link"):
-                lines.append(f"  {i['link']}")
-        self.set("wifi", "\n".join(lines) or "No Wi-Fi interfaces.")
+        for x in get_wifi():
+            lines.append(f"{x['name']:<12} {'CONNECTED' if x['connected'] else 'DISCONNECTED'}")
+            if x.get("link"):
+                lines.append(f"  {x['link']}")
+        return "\n".join(lines) or "No Wi-Fi interfaces."
 
-    def update_users(self):
-        lines = [
-            f"{u['name']:<20} {str(u['terminal']):<10} "
-            f"{str(u['host']):<20} PID {u['pid']}"
-            for u in get_users()
-        ]
-        self.set("users", "\n".join(lines) or "No logged-in users.")
+    def collect_users(self):
+        return "\n".join(
+            f"{x['name']:<20} {str(x['terminal']):<10} "
+            f"{str(x['host']):<20} PID {x['pid']}"
+            for x in get_users()
+        ) or "No logged-in users."
 
-    def update_logs(self):
-        self.set("logs", "\n".join(get_logs(20)) or "No logs.")
+    def collect_logs(self):
+        return "\n".join(get_logs(20)) or "No logs."
 
-    def update_kernel(self):
+    def collect_kernel(self):
         k = get_kernel()
-        self.set(
-            "kernel",
+        return (
             f"Release       {k['release']}\nVersion       {k['version']}\n"
             f"Machine       {k['machine']}\nCommand line  {k['cmdline']}\n\n"
             f"Loaded modules: {len(k['modules'])}"
         )
 
-    def update_process_tree(self):
-        tree, lines = get_process_tree(), []
+    def collect_process_tree(self):
+        tree = get_process_tree()
+        lines = []
         for pid, children in tree.items():
             if children:
-                names = ", ".join(
-                    f"{x['name']}({x['pid']})" for x in children[:8]
-                )
+                names = ", ".join(f"{x['name']}({x['pid']})" for x in children[:8])
                 lines.append(f"{pid:<8} → {names}")
-        self.set("process_tree", "\n".join(lines[:80]) or "No process tree.")
+        return "\n".join(lines[:80]) or "No process tree."
 
-    def update_containers(self):
-        lines = [
-            f"{c['id'][:12]:12} {c['name']:<20} "
-            f"{c['status']:<25} {c['image']}"
-            for c in get_containers()
-        ]
-        self.set("containers", "\n".join(lines) or "No containers.")
+    def collect_containers(self):
+        return "\n".join(
+            f"{x['id'][:12]:12} {x['name']:<20} {x['status']:<25} {x['image']}"
+            for x in get_containers()
+        ) or "No containers."
 
-    def update_virtualization(self):
-        v = get_virtualization()
-        self.set(
-            "virtualization",
-            f"Virtualization  {v['virtualization']}\n"
-            f"KVM             {'available' if v['kvm'] else 'unavailable'}\n"
-            f"Hypervisor      {'present' if v['hypervisor'] else 'not detected'}"
+    def collect_virtualization(self):
+        x = get_virtualization()
+        return (
+            f"Virtualization  {x['virtualization']}\n"
+            f"KVM             {'available' if x['kvm'] else 'unavailable'}\n"
+            f"Hypervisor      {'present' if x['hypervisor'] else 'not detected'}"
         )
 
-    def update_packages(self):
-        p = get_packages()
-        self.set(
-            "packages",
-            f"Manager   {p['manager'] or 'none'}\n"
-            f"Packages  {len(p['packages']):,}\n\n"
-            + "\n".join(p["packages"][:50])
+    def collect_packages(self):
+        x = get_packages()
+        return (
+            f"Manager   {x['manager'] or 'none'}\n"
+            f"Packages  {len(x['packages']):,}\n\n"
+            + "\n".join(x["packages"][:50])
         )
 
-    def update_mounts(self):
-        lines = [
-            f"{m['device']:<25} {m['mount']:<30} "
-            f"{m['fstype']:<10} {m['options']}"
-            for m in get_mounts()
-        ]
-        self.set("mounts", "\n".join(lines) or "No mounts.")
+    def collect_mounts(self):
+        return "\n".join(
+            f"{x['device']:<25} {x['mount']:<30} {x['fstype']:<10} {x['options']}"
+            for x in get_mounts()
+        ) or "No mounts."
 
-    def update_cron(self):
-        timers, cron = get_timers(), get_crontab()
-        if not timers and not cron:
-            self.set("cron", "No timers or crontab.")
-            return
-        self.set(
-            "cron",
-            "SYSTEMD TIMERS\n" + "\n".join(timers[:30]) +
-            "\n\nCRONTAB\n" + "\n".join(cron)
+    def collect_cron(self):
+        t, c = get_timers(), get_crontab()
+        if not t and not c:
+            return "No timers or crontab."
+        return "SYSTEMD TIMERS\n" + "\n".join(t[:30]) + "\n\nCRONTAB\n" + "\n".join(c)
+
+    def collect_gpu_processes(self):
+        return "\n".join(
+            f"{x['pid']:<8} {x['name']:<35} {x['vram']:>8} MiB"
+            for x in get_gpu_processes()
+        ) or "No GPU processes."
+
+    def collect_ai(self):
+        return "\n".join(
+            f"{x['pid']:<8} {x['name']:<20} CPU {x['cpu']:5.1f}% RAM {self.bytes(x['memory'])}"
+            for x in get_ai_processes()
+        ) or "No AI processes detected."
+
+    def collect_ollama(self):
+        return "\n".join(
+            f"{x.get('name','?'):<35} {x.get('size','?')} {x.get('expires_at','')}"
+            for x in get_ollama()
+        ) or "Ollama is not running."
+
+    def collect_cuda(self):
+        x = get_cuda()
+        if not x:
+            return "NVIDIA CUDA unavailable."
+        return "\n".join(
+            f"{g['name']}\nDriver    {g['driver']}\nCUDA      {g['cuda']}"
+            for g in x
         )
 
-    def update_gpu_processes(self):
+    def collect_pytorch(self):
+        x = get_pytorch()
         lines = [
-            f"{p['pid']:<8} {p['name']:<35} {p['vram']:>8} MiB"
-            for p in get_gpu_processes()
+            f"PyTorch   {x['version'] or 'not installed'}",
+            f"CUDA      {x['cuda'] or 'none'}",
+            f"Available {'YES' if x['available'] else 'NO'}",
         ]
-        self.set("gpu_processes", "\n".join(lines) or "No GPU processes.")
-
-    def update_ai(self):
-        lines = [
-            f"{p['pid']:<8} {p['name']:<20} "
-            f"CPU {p['cpu']:5.1f}%  RAM {self.bytes(p['memory'])}"
-            for p in get_ai_processes()
-        ]
-        self.set("ai", "\n".join(lines) or "No AI processes detected.")
-
-    def update_ollama(self):
-        lines = [
-            f"{m.get('name', '?'):<35} {m.get('size', '?')} "
-            f"{m.get('expires_at', '')}"
-            for m in get_ollama()
-        ]
-        self.set("ollama", "\n".join(lines) or "Ollama is not running.")
-
-    def update_cuda(self):
-        cuda = get_cuda()
-        if not cuda:
-            self.set("cuda", "NVIDIA CUDA unavailable.")
-            return
-        self.set(
-            "cuda",
-            "\n".join(
-                f"{g['name']}\nDriver    {g['driver']}\nCUDA      {g['cuda']}"
-                for g in cuda
-            )
-        )
-
-    def update_pytorch(self):
-        p = get_pytorch()
-        lines = [
-            f"PyTorch   {p['version'] or 'not installed'}",
-            f"CUDA      {p['cuda'] or 'none'}",
-            f"Available {'YES' if p['available'] else 'NO'}"
-        ]
-        for g in p["gpus"]:
-            lines += [
-                "", f"GPU {g['index']}  {g['name']}",
-                f"VRAM      {self.bytes(g['memory'])}"
-            ]
-        self.set("pytorch", "\n".join(lines))
+        for g in x["gpus"]:
+            lines += ["", f"GPU {g['index']}  {g['name']}",
+                      f"VRAM      {self.bytes(g['memory'])}"]
+        return "\n".join(lines)
 
     @staticmethod
     def bar(value, width=18):
         value = max(0, min(100, float(value)))
-        filled = int(width * value / 100)
-        return "█" * filled + "░" * (width - filled)
+        n = int(width * value / 100)
+        return "█" * n + "░" * (width - n)
 
     @staticmethod
     def bytes(value):
