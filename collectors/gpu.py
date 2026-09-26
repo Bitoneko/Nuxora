@@ -10,6 +10,7 @@ def get_gpu():
 
         for i in range(n.nvmlDeviceGetCount()):
             h = n.nvmlDeviceGetHandleByIndex(i)
+
             name = n.nvmlDeviceGetName(h)
             name = name.decode() if isinstance(name, bytes) else name
 
