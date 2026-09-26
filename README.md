@@ -22,21 +22,14 @@ It continuously updates system information while you work, making it easy to mon
 - Keyboard-driven navigation
 - Configurable refresh interval
 - Lightweight terminal operation
-
-## Planned
-
 - AI workload detection
 - GPU process monitoring
-- Detailed process inspector
-- System resource history
 - Disk analyzer
 - Network connection viewer
 - Service monitoring
 - Container monitoring
 - System diagnostics
 - Log viewer
-- More hardware sensors
-- Customizable interface
 
 ## Installation
 
