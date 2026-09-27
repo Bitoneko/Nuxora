@@ -395,7 +395,7 @@ class Nuxora(App):
             "cuda": self.collect_cuda,
         }
 
-        self._shutdown = False
+        self._is_shutdown = False
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -451,11 +451,11 @@ class Nuxora(App):
         )
 
     def on_unmount(self):
-        self._shutdown = True
+        self._is_shutdown = True
         self.executor.shutdown(wait=False)
 
     def action_quit(self):
-        self._shutdown = True
+        self._is_shutdown = True
         self.executor.shutdown(wait=False)
         self.save_theme()
         self.save_visibility()
@@ -539,7 +539,7 @@ class Nuxora(App):
             self.running.add(key)
 
         def worker_wrapper():
-            if self._shutdown:
+            if self._is_shutdown:
                 return
 
             try:
