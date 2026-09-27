@@ -1,6 +1,8 @@
 import json
 import os
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 from textual.app import App, ComposeResult
 from textual.binding import Binding
@@ -299,16 +301,13 @@ class Nuxora(App):
 
     medium = {
         "disk",
-        "processes",
-        "sensors",
         "battery",
         "wifi",
-        "gpu_processes",
-        "ai",
-        "pytorch",
+        "sensors",
     }
 
     slow = {
+        "processes",
         "services",
         "filesystem",
         "usb",
@@ -324,8 +323,11 @@ class Nuxora(App):
         "packages",
         "mounts",
         "cron",
+        "gpu_processes",
+        "ai",
         "ollama",
         "cuda",
+        "pytorch",
     }
 
     def __init__(self):
@@ -348,9 +350,17 @@ class Nuxora(App):
         )
 
         self.running = set()
+        self._cache = {}
+        self._cache_time = {}
+        self._collector_lock = threading.Lock()
 
         self.net = None
         self.net_time = time.monotonic()
+
+        self.executor = ThreadPoolExecutor(
+            max_workers=4,
+            thread_name_prefix="nuxora-collector"
+        )
 
         self.jobs = {
             "system": self.collect_system,
@@ -384,6 +394,8 @@ class Nuxora(App):
             "ollama": self.collect_ollama,
             "cuda": self.collect_cuda,
         }
+
+        self._shutdown = False
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -424,21 +436,27 @@ class Nuxora(App):
         self.refresh_all()
 
         self.set_interval(
-            1,
+            0.5,
             self.update_fast,
         )
 
         self.set_interval(
-            3,
+            1,
             self.update_medium,
         )
 
         self.set_interval(
-            10,
+            5,
             self.update_slow,
         )
 
+    def on_unmount(self):
+        self._shutdown = True
+        self.executor.shutdown(wait=False)
+
     def action_quit(self):
+        self._shutdown = True
+        self.executor.shutdown(wait=False)
         self.save_theme()
         self.save_visibility()
         self.exit()
@@ -508,38 +526,43 @@ class Nuxora(App):
                 self.run_collector(key)
 
     def run_collector(self, key):
-        if key in self.running:
-            return
+        now = time.monotonic()
 
-        self.running.add(key)
+        cache_ttl = self._get_cache_ttl(key)
+        if cache_ttl > 0 and key in self._cache_time:
+            if (now - self._cache_time[key]) < cache_ttl:
+                return
 
-        self.run_worker(
-            lambda: self.worker(key),
-            thread=True,
-            exclusive=False,
-        )
+        with self._collector_lock:
+            if key in self.running:
+                return
+            self.running.add(key)
 
-    def worker(self, key):
-        try:
-            result = self.jobs[key]()
+        def worker_wrapper():
+            if self._shutdown:
+                return
 
-            self.call_from_thread(
-                self.finished,
-                key,
-                result,
-                None,
-            )
+            try:
+                result = self.jobs[key]()
+                self.call_from_thread(
+                    self._finished,
+                    key,
+                    result,
+                    None,
+                )
+            except Exception as e:
+                self.call_from_thread(
+                    self._finished,
+                    key,
+                    None,
+                    f"{type(e).__name__}: {e}",
+                )
 
-        except Exception as e:
-            self.call_from_thread(
-                self.finished,
-                key,
-                None,
-                f"{type(e).__name__}: {e}",
-            )
+        self.executor.submit(worker_wrapper)
 
-    def finished(self, key, result, error):
-        self.running.discard(key)
+    def _finished(self, key, result, error):
+        with self._collector_lock:
+            self.running.discard(key)
 
         if error:
             self.set(
@@ -547,10 +570,39 @@ class Nuxora(App):
                 f"Collector error: {error}",
             )
         elif result is not None:
+            self._cache[key] = result
+            self._cache_time[key] = time.monotonic()
             self.set(
                 key,
                 result,
             )
+
+    def _get_cache_ttl(self, key):
+        cache_ttl_map = {
+            "cpu": 0.25,
+            "memory": 0.5,
+            "gpu": 0.5,
+            "network": 0.5,
+            "system": 1.0,
+            "disk": 1.0,
+            "battery": 1.0,
+            "wifi": 1.0,
+            "sensors": 1.0,
+            "processes": 2.0,
+            "gpu_processes": 2.0,
+            "ai": 2.0,
+            "pytorch": 2.0,
+            "services": 5.0,
+            "filesystem": 5.0,
+            "containers": 5.0,
+            "process_tree": 3.0,
+            "packages": 10.0,
+            "logs": 3.0,
+            "kernel": 10.0,
+            "ollama": 3.0,
+            "cuda": 3.0,
+        }
+        return cache_ttl_map.get(key, 0)
 
     def enabled(self, key):
         return self.collector_visibility.get(
@@ -774,7 +826,7 @@ class Nuxora(App):
                 f"Usage     {u:5.1f}%\n"
                 f"{self.bar(u)}",
                 f"Temp      "
-                f"{g.get('temp', 0)}°C",
+                f"{g.get('temp', 0)}\u00b0C",
                 f"Power     "
                 f"{g.get('power', 0):.1f} W",
                 f"Clock     "
@@ -844,8 +896,8 @@ class Nuxora(App):
 
         lines += [
             f"{name[:12]:12} "
-            f"↓{self.bytes(i.bytes_recv)} "
-            f"↑{self.bytes(i.bytes_sent)}"
+            f"\u2193{self.bytes(i.bytes_recv)} "
+            f"\u2191{self.bytes(i.bytes_sent)}"
             for name, i in n["interfaces"].items()
         ]
 
@@ -934,7 +986,7 @@ class Nuxora(App):
             for x in items:
                 h = (
                     f" high "
-                    f"{x['high']:.1f}°C"
+                    f"{x['high']:.1f}\u00b0C"
                     if x["high"]
                     else ""
                 )
@@ -942,7 +994,7 @@ class Nuxora(App):
                 lines.append(
                     f"  "
                     f"{x['label'] or '?':20} "
-                    f"{x['current']:6.1f}°C"
+                    f"{x['current']:6.1f}\u00b0C"
                     f"{h}"
                 )
 
@@ -1082,7 +1134,7 @@ class Nuxora(App):
                 )
 
                 lines.append(
-                    f"{pid:<8} → {names}"
+                    f"{pid:<8} \u2192 {names}"
                 )
 
         return (
@@ -1222,8 +1274,8 @@ class Nuxora(App):
         )
 
         return (
-            "█" * n
-            + "░" * (width - n)
+            "\u2588" * n
+            + "\u2591" * (width - n)
         )
 
     @staticmethod
